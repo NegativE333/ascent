@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum TopicStatus {
+  not_started
+  in_progress
+  done
+}
+
+enum TopicPriority {
+  high
+  medium
+  low
+}
+
+model Subject {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  slug         String   @unique
+  displayOrder Int      @default(0) @map("display_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  topics       Topic[]
+
+  @@map("subjects")
+}
+
+model Topic {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @map("user_id") @db.Uuid
+  subjectId       String        @map("subject_id") @db.Uuid
+  name            String
+  status          TopicStatus   @default(not_started)
+  priority        TopicPriority @default(medium)
+  confidence      Int           @default(0)
+  notes           String?
+  lastPracticedAt DateTime?     @map("last_practiced_at")
+  statusUpdatedAt DateTime?     @map("status_updated_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  subject         Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  sessions        McqSession[]
+
+  @@unique([userId, subjectId, name])
+  @@index([userId])
+  @@map("topics")
+}
+
+model McqSession {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  topicId          String   @map("topic_id") @db.Uuid
+  sessionDate      DateTime @map("session_date") @db.Date
+  totalQuestions   Int      @map("total_questions")
+  correctAnswers   Int      @map("correct_answers")
+  timeTakenMinutes Int?     @map("time_taken_minutes")
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  topic            Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([topicId])
+  @@index([sessionDate])
+  @@map("mcq_sessions")
+}
+
+model UserSettings {
+  id                 String    @id @default(uuid()) @db.Uuid
+  userId             String    @unique @map("user_id") @db.Uuid
+  examDate           DateTime? @map("exam_date") @db.Date
+  weeklyTargetTopics Int       @default(3) @map("weekly_target_topics")
+  weeklyTargetMcqs   Int       @default(100) @map("weekly_target_mcqs")
+  seenMilestones     String[]  @default([]) @map("seen_milestones")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@map("user_settings")
+}
+
+model MockTest {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  testDate           DateTime @map("test_date") @db.Date
+  name               String
+  totalQuestions     Int      @map("total_questions")
+  correct            Int
+  wrong              Int
+  score              Float?
+  percentile         Float?
+  sectionalBreakdown Json?    @map("sectional_breakdown")
+  notes              String?
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([testDate])
+  @@map("mock_tests")
+}
+
+model ActivityDay {
+  id     String   @id @default(uuid()) @db.Uuid
+  userId String   @map("user_id") @db.Uuid
+  date   DateTime @db.Date
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@map("activity_days")
+}
