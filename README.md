@@ -68,3 +68,18 @@ Open [http://localhost:3000](http://localhost:3000). Topics seed automatically o
 | `/syllabus/[id]` | Topic detail + MCQ logs |
 | `/analytics` | Trends & streaks |
 | `/login` `/signup` | Auth |
+
+## Deploy (Vercel)
+
+Add these **Environment Variables** in the Vercel project (Production + Preview):
+
+| Variable | Notes |
+|----------|--------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Same as local |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Same as local |
+| `DATABASE_URL` | Must start with `postgresql://` — use Supabase **Session pooler** URI |
+| `DIRECT_URL` | Must start with `postgresql://` — use Supabase **direct** URI |
+
+If your DB password contains `$` or other special characters, URL-encode them (e.g. `$` → `%24`).
+
+Also in Supabase → Authentication → URL Configuration, add your Vercel URL to **Redirect URLs** (e.g. `https://your-app.vercel.app/auth/callback`).
