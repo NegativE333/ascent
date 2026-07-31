@@ -77,9 +77,15 @@ Add these **Environment Variables** in the Vercel project (Production + Preview)
 |----------|--------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Same as local |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Same as local |
+| `NEXT_PUBLIC_SITE_URL` | `https://ascent-ochre-one.vercel.app` (no trailing slash) |
 | `DATABASE_URL` | Must start with `postgresql://` — use Supabase **Session pooler** URI |
 | `DIRECT_URL` | Must start with `postgresql://` — use Supabase **direct** URI |
 
 If your DB password contains `$` or other special characters, URL-encode them (e.g. `$` → `%24`).
 
-Also in Supabase → Authentication → URL Configuration, add your Vercel URL to **Redirect URLs** (e.g. `https://your-app.vercel.app/auth/callback`).
+Also in Supabase → **Authentication → URL Configuration**:
+- **Site URL:** `https://ascent-ochre-one.vercel.app`
+- **Redirect URLs:** add  
+  `https://ascent-ochre-one.vercel.app/**`  
+  `https://ascent-ochre-one.vercel.app/auth/callback`  
+  (keep `http://localhost:3000/**` for local dev)
