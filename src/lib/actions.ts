@@ -28,16 +28,33 @@ async function markActivity(userId: string, date = new Date()) {
 export async function ensureSyllabusSeeded() {
   const user = await requireUser();
 
-  for (const subject of SUBJECT_SEED) {
-    await prisma.subject.upsert({
-      where: { slug: subject.slug },
-      update: { name: subject.name, displayOrder: subject.displayOrder },
-      create: {
-        name: subject.name,
-        slug: subject.slug,
-        displayOrder: subject.displayOrder,
-      },
+  const [subjectCount, topicCount] = await Promise.all([
+    prisma.subject.count(),
+    prisma.topic.count({ where: { userId: user.id } }),
+  ]);
+
+  // Fast path: syllabus already present for this user
+  if (subjectCount >= SUBJECT_SEED.length && topicCount > 0) {
+    await prisma.userSettings.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: { userId: user.id },
     });
+    return;
+  }
+
+  if (subjectCount < SUBJECT_SEED.length) {
+    for (const subject of SUBJECT_SEED) {
+      await prisma.subject.upsert({
+        where: { slug: subject.slug },
+        update: { name: subject.name, displayOrder: subject.displayOrder },
+        create: {
+          name: subject.name,
+          slug: subject.slug,
+          displayOrder: subject.displayOrder,
+        },
+      });
+    }
   }
 
   await prisma.userSettings.upsert({
@@ -46,8 +63,7 @@ export async function ensureSyllabusSeeded() {
     create: { userId: user.id },
   });
 
-  const existing = await prisma.topic.count({ where: { userId: user.id } });
-  if (existing > 0) return;
+  if (topicCount > 0) return;
 
   const subjects = await prisma.subject.findMany();
   const bySlug = new Map(subjects.map((s) => [s.slug, s.id]));

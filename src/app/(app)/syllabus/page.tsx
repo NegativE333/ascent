@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import { SyllabusView } from "@/components/syllabus/syllabus-view";
 import { getSubjects, getTopics } from "@/lib/data";
 
@@ -13,9 +12,7 @@ export default async function SyllabusPage() {
           Update status, rate confidence, and log MCQ practice.
         </p>
       </div>
-      <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
-        <SyllabusView subjects={subjects} topics={topics} />
-      </Suspense>
+      <SyllabusView subjects={subjects} topics={topics} />
     </div>
   );
 }
