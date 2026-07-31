@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SSC CGL Progress Tracker",
+  title: "Ascent",
   description: "Track syllabus prep and MCQ practice for SSC CGL",
 };
 

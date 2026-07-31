@@ -62,9 +62,9 @@ function SidebarNav({
           className="flex min-w-0 items-center gap-2 rounded-[4px] px-2 py-1.5 text-sm font-semibold text-foreground"
         >
           <span className="flex size-5 items-center justify-center rounded-[3px] bg-foreground text-[10px] font-bold text-background">
-            C
+            A
           </span>
-          SSC CGL
+          Ascent
         </Link>
         <ThemeToggle />
       </div>
@@ -205,7 +205,7 @@ export function Sidebar({ subjects }: { subjects: Subject[] }) {
             />
           </SheetContent>
         </Sheet>
-        <span className="text-sm font-semibold">SSC CGL</span>
+        <span className="text-sm font-semibold">Ascent</span>
       </div>
     </>
   );

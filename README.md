@@ -1,4 +1,4 @@
-# SSC CGL Progress Tracker
+# Ascent
 
 Personal web app to track SSC CGL syllabus prep and MCQ practice.
 
