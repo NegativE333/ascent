@@ -28,60 +28,109 @@ async function markActivity(userId: string, date = new Date()) {
 export async function ensureSyllabusSeeded() {
   const user = await requireUser();
 
-  const [subjectCount, topicCount] = await Promise.all([
-    prisma.subject.count(),
-    prisma.topic.count({ where: { userId: user.id } }),
-  ]);
-
-  // Fast path: syllabus already present for this user
-  if (subjectCount >= SUBJECT_SEED.length && topicCount > 0) {
-    await prisma.userSettings.upsert({
-      where: { userId: user.id },
-      update: {},
-      create: { userId: user.id },
-    });
-    return;
-  }
-
-  if (subjectCount < SUBJECT_SEED.length) {
-    for (const subject of SUBJECT_SEED) {
-      await prisma.subject.upsert({
-        where: { slug: subject.slug },
-        update: { name: subject.name, displayOrder: subject.displayOrder },
-        create: {
-          name: subject.name,
-          slug: subject.slug,
-          displayOrder: subject.displayOrder,
-        },
-      });
-    }
-  }
-
   await prisma.userSettings.upsert({
     where: { userId: user.id },
     update: {},
     create: { userId: user.id },
   });
 
-  if (topicCount > 0) return;
+  const expectedTotal = Object.values(TOPIC_SEED).reduce(
+    (n, list) => n + list.length,
+    0
+  );
+
+  const [subjectCount, topicCount, gaUnsectioned] = await Promise.all([
+    prisma.subject.count(),
+    prisma.topic.count({ where: { userId: user.id } }),
+    prisma.topic.count({
+      where: {
+        userId: user.id,
+        subject: { slug: "general-awareness" },
+        OR: [{ section: null }, { section: "" }],
+      },
+    }),
+  ]);
+
+  // Fast path once the detailed GK syllabus is synced
+  if (
+    subjectCount >= SUBJECT_SEED.length &&
+    topicCount >= expectedTotal &&
+    gaUnsectioned === 0
+  ) {
+    return;
+  }
+
+  for (const subject of SUBJECT_SEED) {
+    await prisma.subject.upsert({
+      where: { slug: subject.slug },
+      update: { name: subject.name, displayOrder: subject.displayOrder },
+      create: {
+        name: subject.name,
+        slug: subject.slug,
+        displayOrder: subject.displayOrder,
+      },
+    });
+  }
 
   const subjects = await prisma.subject.findMany();
   const bySlug = new Map(subjects.map((s) => [s.slug, s.id]));
 
-  const rows = Object.entries(TOPIC_SEED).flatMap(([slug, topics]) => {
+  for (const [slug, seedTopics] of Object.entries(TOPIC_SEED)) {
     const subjectId = bySlug.get(slug);
-    if (!subjectId) return [];
-    return topics.map((t) => ({
-      userId: user.id,
-      subjectId,
-      name: t.name,
-      status: t.status ?? ("not_started" as const),
-      confidence: t.confidence ?? 0,
-    }));
-  });
+    if (!subjectId) continue;
 
-  if (rows.length > 0) {
-    await prisma.topic.createMany({ data: rows });
+    const existing = await prisma.topic.findMany({
+      where: { userId: user.id, subjectId },
+      select: {
+        id: true,
+        name: true,
+        section: true,
+        displayOrder: true,
+        _count: { select: { sessions: true } },
+      },
+    });
+    const byName = new Map(existing.map((t) => [t.name, t]));
+    const seedNames = new Set(seedTopics.map((t) => t.name));
+
+    const toCreate = [];
+    for (let i = 0; i < seedTopics.length; i++) {
+      const t = seedTopics[i];
+      const order = i + 1;
+      const hit = byName.get(t.name);
+      if (!hit) {
+        toCreate.push({
+          userId: user.id,
+          subjectId,
+          name: t.name,
+          section: t.section ?? null,
+          displayOrder: order,
+          status: t.status ?? ("not_started" as const),
+          confidence: t.confidence ?? 0,
+        });
+      } else if (
+        hit.section !== (t.section ?? null) ||
+        hit.displayOrder !== order
+      ) {
+        await prisma.topic.update({
+          where: { id: hit.id },
+          data: {
+            section: t.section ?? null,
+            displayOrder: order,
+          },
+        });
+      }
+    }
+
+    if (toCreate.length > 0) {
+      await prisma.topic.createMany({ data: toCreate, skipDuplicates: true });
+    }
+
+    // Drop obsolete seed leftovers with no practice logged
+    for (const old of existing) {
+      if (seedNames.has(old.name)) continue;
+      if (old._count.sessions > 0) continue;
+      await prisma.topic.delete({ where: { id: old.id } });
+    }
   }
 }
 

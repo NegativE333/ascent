@@ -42,6 +42,48 @@ export function subjectProgress(
     });
 }
 
+export type SectionProgress = {
+  section: string;
+  done: number;
+  total: number;
+  percent: number;
+};
+
+/** Progress per main topic/section within a subject (e.g. Geography under GA). */
+export function sectionProgress(
+  topics: Topic[],
+  sectionOrder?: readonly string[]
+): SectionProgress[] {
+  const bySection = new Map<string, Topic[]>();
+  for (const t of topics) {
+    const key = t.section?.trim() || "Other";
+    const list = bySection.get(key) ?? [];
+    list.push(t);
+    bySection.set(key, list);
+  }
+
+  const names = sectionOrder
+    ? [
+        ...sectionOrder.filter((s) => bySection.has(s)),
+        ...[...bySection.keys()]
+          .filter((s) => !sectionOrder.includes(s))
+          .sort(),
+      ]
+    : [...bySection.keys()].sort();
+
+  return names.map((section) => {
+    const rows = bySection.get(section) ?? [];
+    const done = rows.filter((t) => t.status === "done").length;
+    const total = rows.length;
+    return {
+      section,
+      done,
+      total,
+      percent: total === 0 ? 0 : Math.round((done / total) * 100),
+    };
+  });
+}
+
 export function weakTopics(topics: TopicWithSubject[]): TopicWithSubject[] {
   return topics
     .filter((t) => t.confidence <= 2 && t.last_practiced_at != null)

@@ -46,7 +46,12 @@ export const getTopics = cache(async (): Promise<TopicWithSubject[]> => {
   const topics = await prisma.topic.findMany({
     where: { userId },
     include: { subject: true },
-    orderBy: [{ priority: "asc" }, { name: "asc" }],
+    orderBy: [
+      { displayOrder: "asc" },
+      { section: "asc" },
+      { priority: "asc" },
+      { name: "asc" },
+    ],
   });
   return topics.map((t) => mapTopic(t) as TopicWithSubject);
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { sendMagicLink } from "@/lib/auth-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -10,32 +10,23 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-      window.location.origin;
-
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${siteUrl}/auth/callback`,
-        shouldCreateUser: true,
-      },
-    });
+    const result = await sendMagicLink(email);
 
     setLoading(false);
 
-    if (error) {
-      setError(error.message);
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
+    setRedirectTo(result.redirectTo);
     setSent(true);
   }
 
@@ -59,6 +50,12 @@ export default function LoginPage() {
               We sent a login link to <span className="text-foreground">{email}</span>.
               It may take a minute.
             </p>
+            {redirectTo && (
+              <p className="mt-3 break-all text-[11px] text-muted-foreground">
+                Redirect target:{" "}
+                <span className="text-foreground">{redirectTo}</span>
+              </p>
+            )}
             <button
               type="button"
               className="mt-4 text-sm text-muted-foreground underline hover:text-foreground"

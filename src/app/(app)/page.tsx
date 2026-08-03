@@ -76,7 +76,7 @@ export default async function DashboardPage() {
             Open syllabus
           </Link>
         </div>
-        <SubjectProgress items={progress} />
+        <SubjectProgress items={progress} topics={topics} />
       </section>
 
       <section>

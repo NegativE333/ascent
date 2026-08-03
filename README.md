@@ -30,6 +30,8 @@ DATABASE_URL=postgresql://postgres:PASSWORD@db.REF.supabase.co:5432/postgres?ssl
 DIRECT_URL=postgresql://postgres:PASSWORD@db.REF.supabase.co:5432/postgres?sslmode=require
 ```
 
+Leave `NEXT_PUBLIC_SITE_URL` unset locally. The app uses the request host for magic-link redirects.
+
 ### 3. Create tables (Prisma)
 
 ```bash
@@ -77,15 +79,22 @@ Add these **Environment Variables** in the Vercel project (Production + Preview)
 |----------|--------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Same as local |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Same as local |
-| `NEXT_PUBLIC_SITE_URL` | `https://ascent-ochre-one.vercel.app` (no trailing slash) |
+| `NEXT_PUBLIC_SITE_URL` | Optional: `https://ascent-ochre-one.vercel.app`. Leave unset locally. |
 | `DATABASE_URL` | Must start with `postgresql://` — use Supabase **Session pooler** URI |
 | `DIRECT_URL` | Must start with `postgresql://` — use Supabase **direct** URI |
 
 If your DB password contains `$` or other special characters, URL-encode them (e.g. `$` → `%24`).
 
+Magic links follow **where you clicked Send**:
+- Local login → `http://localhost:3000/auth/callback`
+- Prod login → `https://ascent-ochre-one.vercel.app/auth/callback`
+
 Also in Supabase → **Authentication → URL Configuration**:
 - **Site URL:** `https://ascent-ochre-one.vercel.app`
-- **Redirect URLs:** add  
-  `https://ascent-ochre-one.vercel.app/**`  
-  `https://ascent-ochre-one.vercel.app/auth/callback`  
-  (keep `http://localhost:3000/**` for local dev)
+- **Redirect URLs** (must include all):
+  - `https://ascent-ochre-one.vercel.app/**`
+  - `https://ascent-ochre-one.vercel.app/auth/callback`
+  - `http://localhost:3000/**`
+  - `http://localhost:3000/auth/callback`
+
+If localhost is missing from Redirect URLs, Supabase rewrites local magic links to the prod Site URL.

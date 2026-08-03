@@ -36,6 +36,8 @@ model Topic {
   userId          String        @map("user_id") @db.Uuid
   subjectId       String        @map("subject_id") @db.Uuid
   name            String
+  section         String?
+  displayOrder    Int           @default(0) @map("display_order")
   status          TopicStatus   @default(not_started)
   priority        TopicPriority @default(medium)
   confidence      Int           @default(0)
@@ -48,6 +50,7 @@ model Topic {
 
   @@unique([userId, subjectId, name])
   @@index([userId])
+  @@index([subjectId, section])
   @@map("topics")
 }
 

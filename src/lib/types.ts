@@ -14,6 +14,8 @@ export type Topic = {
   user_id: string;
   subject_id: string;
   name: string;
+  section: string | null;
+  display_order: number;
   status: TopicStatus;
   priority: TopicPriority;
   confidence: number;

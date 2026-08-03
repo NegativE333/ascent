@@ -12,7 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TopicRow } from "@/components/syllabus/topic-row";
-import { needsRevision } from "@/lib/stats";
+import { GA_SECTION_ORDER } from "@/lib/syllabus-seed";
+import { needsRevision, sectionProgress } from "@/lib/stats";
 import type {
   Subject,
   TopicPriority,
@@ -21,6 +22,15 @@ import type {
 } from "@/lib/types";
 
 const priorityRank = { high: 0, medium: 1, low: 2 };
+
+function sectionSortKey(section: string | null, subjectSlug: string) {
+  if (!section) return 999;
+  if (subjectSlug === "general-awareness") {
+    const idx = (GA_SECTION_ORDER as readonly string[]).indexOf(section);
+    return idx === -1 ? 500 : idx;
+  }
+  return 0;
+}
 
 export function SyllabusView({
   subjects,
@@ -69,6 +79,12 @@ export function SyllabusView({
         return true;
       })
       .sort((a, b) => {
+        const sec =
+          sectionSortKey(a.section, a.subjects.slug) -
+          sectionSortKey(b.section, b.subjects.slug);
+        if (sec !== 0) return sec;
+        if (a.display_order !== b.display_order)
+          return a.display_order - b.display_order;
         const pr = priorityRank[a.priority] - priorityRank[b.priority];
         if (pr !== 0) return pr;
         return a.name.localeCompare(b.name);
@@ -200,31 +216,92 @@ export function SyllabusView({
         </div>
       ) : (
         <div className="space-y-6">
-          {groups.map(({ subject, rows }) => (
-            <section key={subject.id}>
-              <div className="mb-2 flex items-baseline justify-between gap-2">
-                <h2 className="text-sm font-semibold text-foreground">
-                  {subject.name}
-                </h2>
-                <span className="text-xs text-muted-foreground">
-                  {rows.filter((t) => t.status === "done").length}/{rows.length}{" "}
-                  done
-                </span>
-              </div>
-              <div className="panel overflow-hidden">
-                <div className="table-head hidden border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.3fr)_auto_auto_auto_auto] sm:gap-3">
-                  <span>Topic</span>
-                  <span>Priority</span>
-                  <span>Confidence</span>
-                  <span>Status</span>
-                  <span />
+          {groups.map(({ subject, rows }) => {
+            const hasSections = rows.some((t) => t.section);
+            const sections = hasSections
+              ? sectionProgress(
+                  rows,
+                  subject.slug === "general-awareness"
+                    ? GA_SECTION_ORDER
+                    : undefined
+                )
+              : [];
+
+            return (
+              <section key={subject.id} className="space-y-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {subject.name}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {rows.filter((t) => t.status === "done").length}/
+                    {rows.length} done ·{" "}
+                    {rows.length === 0
+                      ? 0
+                      : Math.round(
+                          (rows.filter((t) => t.status === "done").length /
+                            rows.length) *
+                            100
+                        )}
+                    %
+                  </span>
                 </div>
-                {rows.map((topic) => (
-                  <TopicRow key={topic.id} topic={topic} />
-                ))}
-              </div>
-            </section>
-          ))}
+
+                {hasSections ? (
+                  <div className="space-y-4">
+                    {sections.map((sec) => {
+                      const sectionRows = rows.filter(
+                        (t) => (t.section?.trim() || "Other") === sec.section
+                      );
+                      return (
+                        <div key={sec.section}>
+                          <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              {sec.section}
+                            </h3>
+                            <span className="stat-number text-[11px] text-muted-foreground">
+                              {sec.done}/{sec.total} · {sec.percent}%
+                            </span>
+                          </div>
+                          <div className="mb-2 h-1 overflow-hidden rounded-[2px] bg-track">
+                            <div
+                              className="h-full rounded-[2px] bg-primary transition-[width] duration-200"
+                              style={{ width: `${sec.percent}%` }}
+                            />
+                          </div>
+                          <div className="panel overflow-hidden">
+                            <div className="table-head hidden border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.3fr)_auto_auto_auto_auto] sm:gap-3">
+                              <span>Topic</span>
+                              <span>Priority</span>
+                              <span>Confidence</span>
+                              <span>Status</span>
+                              <span />
+                            </div>
+                            {sectionRows.map((topic) => (
+                              <TopicRow key={topic.id} topic={topic} />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="panel overflow-hidden">
+                    <div className="table-head hidden border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.3fr)_auto_auto_auto_auto] sm:gap-3">
+                      <span>Topic</span>
+                      <span>Priority</span>
+                      <span>Confidence</span>
+                      <span>Status</span>
+                      <span />
+                    </div>
+                    {rows.map((topic) => (
+                      <TopicRow key={topic.id} topic={topic} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       )}
     </div>

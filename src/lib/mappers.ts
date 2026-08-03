@@ -42,6 +42,8 @@ export function mapTopic(
     user_id: t.userId,
     subject_id: t.subjectId,
     name: t.name,
+    section: t.section ?? null,
+    display_order: t.displayOrder ?? 0,
     status: t.status as TopicStatus,
     priority: t.priority as TopicPriority,
     confidence: t.confidence,
