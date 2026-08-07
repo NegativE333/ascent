@@ -9,9 +9,10 @@ import {
   updateTopicPriority,
   updateTopicStatus,
 } from "@/lib/actions";
-import { reviewSchedule } from "@/lib/stats";
+import { reviewSchedule, topicMinutes } from "@/lib/stats";
 import { ConfidenceStars } from "@/components/syllabus/confidence-stars";
 import { StatusControl } from "@/components/syllabus/status-control";
+import { EstimateEditor } from "@/components/topic/estimate-editor";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -104,6 +105,10 @@ export function TopicControls({ topic }: { topic: TopicWithSubject }) {
           <p className="text-xs text-muted-foreground">Confidence</p>
           <ConfidenceStars value={confidence} onChange={setConfidence} />
         </div>
+      </section>
+
+      <section className="border-t border-border pt-3">
+        <EstimateEditor topicId={topic.id} minutes={topicMinutes(topic)} />
       </section>
 
       {review && (

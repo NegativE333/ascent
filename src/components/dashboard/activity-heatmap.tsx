@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
-import { buildHeatmap } from "@/lib/stats";
-import type { McqSession } from "@/lib/types";
+import { buildHeatmap, hoursLabel } from "@/lib/stats";
+import type { McqSession, StudySession } from "@/lib/types";
 
 function levelClass(count: number) {
   if (count === 0) return "bg-heatmap-0";
@@ -14,17 +14,40 @@ function levelClass(count: number) {
   return "bg-heatmap-4";
 }
 
-function cellLabel(cell: { date: string; count: number; questions: number }) {
+function cellLabel(cell: {
+  date: string;
+  count: number;
+  questions: number;
+  studyMinutes: number;
+}) {
   const date = format(parseISO(cell.date), "EEE, MMM d, yyyy");
-  if (cell.count === 0) return { date, detail: "No practice" };
-  return {
-    date,
-    detail: `${cell.count} session${cell.count === 1 ? "" : "s"} · ${cell.questions} question${cell.questions === 1 ? "" : "s"}`,
-  };
+  if (cell.count === 0) return { date, detail: "No activity" };
+
+  const parts: string[] = [];
+  if (cell.questions > 0) {
+    parts.push(
+      `${cell.questions} question${cell.questions === 1 ? "" : "s"}`
+    );
+  }
+  if (cell.studyMinutes > 0) {
+    parts.push(`${hoursLabel(cell.studyMinutes)} studied`);
+  }
+  if (parts.length === 0) {
+    parts.push(
+      `${cell.count} session${cell.count === 1 ? "" : "s"}`
+    );
+  }
+  return { date, detail: parts.join(" · ") };
 }
 
-export function ActivityHeatmap({ sessions }: { sessions: McqSession[] }) {
-  const cells = buildHeatmap(sessions, 119);
+export function ActivityHeatmap({
+  sessions,
+  study = [],
+}: {
+  sessions: McqSession[];
+  study?: StudySession[];
+}) {
+  const cells = buildHeatmap(sessions, 119, study);
   const weeks: (typeof cells)[] = [];
   for (let i = 0; i < cells.length; i += 7) {
     weeks.push(cells.slice(i, i + 7));
@@ -34,6 +57,7 @@ export function ActivityHeatmap({ sessions }: { sessions: McqSession[] }) {
     date: string;
     count: number;
     questions: number;
+    studyMinutes: number;
     x: number;
     y: number;
   } | null>(null);

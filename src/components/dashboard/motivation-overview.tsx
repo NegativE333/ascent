@@ -111,11 +111,13 @@ function ProjectionCell({
 export function MotivationOverview({
   streak,
   longest,
+  totalDays,
   pace,
   week,
 }: {
   streak: number;
   longest: number;
+  totalDays: number;
   pace: ExamPace;
   week: Week;
 }) {
@@ -163,9 +165,18 @@ export function MotivationOverview({
               {streak}
             </motion.span>
           }
-          hint="days"
+          hint={
+            longest > 0
+              ? `longest ${longest} day${longest === 1 ? "" : "s"}`
+              : "miss a day → resets"
+          }
         />
-        <StatCell label="Longest streak" emphasize value={longest} hint="days" />
+        <StatCell
+          label="Total days studied"
+          emphasize
+          value={totalDays}
+          hint="never resets"
+        />
         <StatCell
           label="Days to exam"
           value={daysLeft ?? "—"}
@@ -192,18 +203,29 @@ export function MotivationOverview({
         </div>
       )}
 
-      {pace.atCurrentHabits && pace.ifDaily && (
-        <div className="grid grid-cols-2 divide-x divide-border border-b border-border">
+      {pace.ifDaily && (
+        <div
+          className={`grid divide-x divide-border border-b border-border ${
+            pace.atCurrentHabits ? "grid-cols-2" : "grid-cols-1"
+          }`}
+        >
+          {pace.atCurrentHabits && (
+            <ProjectionCell
+              label="At current habits"
+              date={pace.atCurrentHabits.projectedDate}
+              detail={`${hoursLabel(
+                pace.studyDaysPerWeek > 0
+                  ? (pace.atCurrentHabits.hoursPerWeek * 60) /
+                    pace.studyDaysPerWeek
+                  : (pace.atCurrentHabits.hoursPerWeek * 60) / 7
+              )}/day · ${pace.studyDaysPerWeek} study days/week`}
+              behind={pace.atCurrentHabits.status === "behind"}
+            />
+          )}
           <ProjectionCell
-            label="At current habits"
-            date={pace.atCurrentHabits.projectedDate}
-            detail={`${pace.atCurrentHabits.hoursPerWeek}h/week · ${pace.studyDaysPerWeek} study days/week`}
-            behind={pace.atCurrentHabits.status === "behind"}
-          />
-          <ProjectionCell
-            label="If you study daily"
+            label="Study daily to finish early"
             date={pace.ifDaily.projectedDate}
-            detail={`${pace.ifDaily.hoursPerWeek}h/week`}
+            detail={`${hoursLabel((pace.ifDaily.hoursPerWeek * 60) / 7)}/day · 1 month before exam`}
             behind={pace.ifDaily.status === "behind"}
           />
         </div>

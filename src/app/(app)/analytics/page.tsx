@@ -19,6 +19,7 @@ export default async function AnalyticsPage() {
   const { subjects, topics, sessions, activityDates, mocks, settings, study } =
     await getDashboardData();
   const { current: streak, longest: best } = streakFromDays(activityDates);
+  const totalDays = new Set(activityDates).size;
   const trend = accuracyTrend(sessions, subjects, topics);
   const timeData = timeBySubject(sessions, subjects, topics, study);
   const bests = personalBests(sessions);
@@ -109,7 +110,7 @@ export default async function AnalyticsPage() {
 
       <section>
         <h2 className="mb-3 text-sm font-semibold">Practice streak</h2>
-        <StreakCounter current={streak} longest={best} />
+        <StreakCounter current={streak} longest={best} totalDays={totalDays} />
       </section>
 
       <section>

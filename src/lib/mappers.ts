@@ -24,6 +24,8 @@ function iso(d: Date | null | undefined): string | null {
 }
 
 function dateOnly(d: Date): string {
+  // @db.Date values come back as UTC midnight; prefer the UTC calendar day
+  // so a stored "2026-08-08" doesn't become "2026-08-07" in IST.
   return d.toISOString().slice(0, 10);
 }
 
@@ -113,6 +115,7 @@ export function mapSettings(s: PrismaUserSettings): UserSettings {
     weekly_target_topics: s.weeklyTargetTopics,
     weekly_target_mcqs: s.weeklyTargetMcqs,
     target_score: s.targetScore,
+    cutoff_category: (s.cutoffCategory as UserSettings["cutoff_category"]) ?? "ur",
     reminder_time: s.reminderTime,
     reminder_offset: s.reminderOffset,
     seen_milestones: s.seenMilestones,

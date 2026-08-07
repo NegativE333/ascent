@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import {
   SUBJECT_SEED,
+  TOPIC_RENAMES_BY_SLUG,
   TOPIC_SEED,
   seedEstimateMinutes,
 } from "@/lib/syllabus-seed";
@@ -24,8 +25,21 @@ async function requireUser() {
   return user;
 }
 
-function activityUpsert(userId: string, date = new Date()) {
-  const day = new Date(date.toISOString().slice(0, 10));
+/** Store a YYYY-MM-DD calendar day as a Date that survives UTC mapping. */
+function dateOnly(value: string | Date = new Date()) {
+  const key =
+    typeof value === "string"
+      ? value.slice(0, 10)
+      : [
+          value.getFullYear(),
+          String(value.getMonth() + 1).padStart(2, "0"),
+          String(value.getDate()).padStart(2, "0"),
+        ].join("-");
+  return new Date(`${key}T12:00:00.000Z`);
+}
+
+function activityUpsert(userId: string, date: string | Date = new Date()) {
+  const day = dateOnly(date);
   return prisma.activityDay.upsert({
     where: { userId_date: { userId, date: day } },
     update: {},
@@ -34,14 +48,15 @@ function activityUpsert(userId: string, date = new Date()) {
 }
 
 /**
- * Seed verification costs ~4 round trips. The syllabus only changes when the
- * seed file does, so remember verified users for the life of the process.
+ * Seed verification costs a few round trips. Bump the version whenever the
+ * seed file changes so in-process caches re-sync instead of skipping.
  */
-const verifiedSyllabusUsers = new Set<string>();
+const SYLLABUS_SEED_VERSION = 3;
+const verifiedSyllabusUsers = new Map<string, number>();
 
 export async function ensureSyllabusSeeded() {
   const user = await requireUser();
-  if (verifiedSyllabusUsers.has(user.id)) return;
+  if (verifiedSyllabusUsers.get(user.id) === SYLLABUS_SEED_VERSION) return;
 
   await prisma.userSettings.upsert({
     where: { userId: user.id },
@@ -54,30 +69,54 @@ export async function ensureSyllabusSeeded() {
     0
   );
 
-  const [subjectCount, topicCount, gaUnsectioned, missingEstimates] =
-    await Promise.all([
-      prisma.subject.count(),
-      prisma.topic.count({ where: { userId: user.id } }),
-      prisma.topic.count({
-        where: {
-          userId: user.id,
-          subject: { slug: "general-awareness" },
-          OR: [{ section: null }, { section: "" }],
-        },
-      }),
-      prisma.topic.count({
-        where: { userId: user.id, estimatedMinutes: 0 },
-      }),
-    ]);
+  const expectedQuant = TOPIC_SEED["quantitative-aptitude"]?.length ?? 0;
+  const expectedReasoning =
+    TOPIC_SEED["general-intelligence-reasoning"]?.length ?? 0;
 
-  // Fast path once the detailed GK syllabus is synced
+  const [
+    subjectCount,
+    topicCount,
+    gaUnsectioned,
+    missingEstimates,
+    quantCount,
+    reasoningCount,
+  ] = await Promise.all([
+    prisma.subject.count(),
+    prisma.topic.count({ where: { userId: user.id } }),
+    prisma.topic.count({
+      where: {
+        userId: user.id,
+        subject: { slug: "general-awareness" },
+        OR: [{ section: null }, { section: "" }],
+      },
+    }),
+    prisma.topic.count({
+      where: { userId: user.id, estimatedMinutes: 0 },
+    }),
+    prisma.topic.count({
+      where: {
+        userId: user.id,
+        subject: { slug: "quantitative-aptitude" },
+      },
+    }),
+    prisma.topic.count({
+      where: {
+        userId: user.id,
+        subject: { slug: "general-intelligence-reasoning" },
+      },
+    }),
+  ]);
+
+  // Fast path once Quant + Reasoning + GK syllabi are synced
   if (
     subjectCount >= SUBJECT_SEED.length &&
     topicCount >= expectedTotal &&
+    quantCount >= expectedQuant &&
+    reasoningCount >= expectedReasoning &&
     gaUnsectioned === 0 &&
     missingEstimates === 0
   ) {
-    verifiedSyllabusUsers.add(user.id);
+    verifiedSyllabusUsers.set(user.id, SYLLABUS_SEED_VERSION);
     return;
   }
 
@@ -111,8 +150,28 @@ export async function ensureSyllabusSeeded() {
         _count: { select: { sessions: true } },
       },
     });
+
+    // Rename topics in place so practice history follows the new names
+    const renames = TOPIC_RENAMES_BY_SLUG[slug];
+    if (renames) {
+      for (const [from, to] of Object.entries(renames)) {
+        const old = existing.find((t) => t.name === from);
+        const taken = existing.some((t) => t.name === to);
+        if (!old || taken) continue;
+        await prisma.topic.update({
+          where: { id: old.id },
+          data: { name: to },
+        });
+        old.name = to;
+      }
+    }
+
     const byName = new Map(existing.map((t) => [t.name, t]));
     const seedNames = new Set(seedTopics.map((t) => t.name));
+    // Refresh seeded estimates for Quant/Reasoning when the plan changes
+    const syncEstimates =
+      slug === "quantitative-aptitude" ||
+      slug === "general-intelligence-reasoning";
 
     const toCreate = [];
     for (let i = 0; i < seedTopics.length; i++) {
@@ -135,15 +194,19 @@ export async function ensureSyllabusSeeded() {
       } else if (
         hit.section !== (t.section ?? null) ||
         hit.displayOrder !== order ||
-        hit.estimatedMinutes === 0
+        hit.estimatedMinutes === 0 ||
+        (syncEstimates && hit.estimatedMinutes !== estimatedMinutes)
       ) {
         await prisma.topic.update({
           where: { id: hit.id },
           data: {
             section: t.section ?? null,
             displayOrder: order,
-            // Only backfill; never clobber an estimate the user has tuned
-            ...(hit.estimatedMinutes === 0 ? { estimatedMinutes } : {}),
+            // Quant estimates come from the plan CSV and should refresh;
+            // elsewhere only backfill zeros so user edits stick.
+            ...(hit.estimatedMinutes === 0 || syncEstimates
+              ? { estimatedMinutes }
+              : {}),
           },
         });
       }
@@ -161,7 +224,7 @@ export async function ensureSyllabusSeeded() {
     }
   }
 
-  verifiedSyllabusUsers.add(user.id);
+  verifiedSyllabusUsers.set(user.id, SYLLABUS_SEED_VERSION);
 }
 
 export async function updateTopicStatus(topicId: string, status: TopicStatus) {
@@ -250,6 +313,21 @@ export async function updateTopicNotes(topicId: string, notes: string) {
   revalidatePath("/notes");
 }
 
+/** Overrides the seeded study-time estimate for pace and progress weighting. */
+export async function updateTopicEstimate(topicId: string, minutes: number) {
+  const user = await requireUser();
+  const estimatedMinutes = Math.max(5, Math.min(24 * 60, Math.round(minutes)));
+  await prisma.topic.updateMany({
+    where: { id: topicId, userId: user.id },
+    data: { estimatedMinutes },
+  });
+  revalidatePath("/");
+  revalidatePath("/syllabus");
+  revalidatePath(`/syllabus/${topicId}`);
+  revalidatePath("/analytics");
+  revalidatePath("/settings");
+}
+
 export async function createMcqSession(input: {
   topicId: string;
   totalQuestions: number;
@@ -305,6 +383,8 @@ export async function logStudySession(input: {
   topicId: string;
   minutes: number;
   source?: string;
+  /** Browser-local YYYY-MM-DD so IST nights don't land on UTC yesterday. */
+  sessionDate?: string;
 }) {
   const user = await requireUser();
   const minutes = Math.round(input.minutes);
@@ -317,7 +397,7 @@ export async function logStudySession(input: {
   if (!topic) throw new Error("Topic not found");
 
   const now = new Date();
-  const sessionDate = new Date(now.toISOString().slice(0, 10));
+  const sessionDate = dateOnly(input.sessionDate ?? now);
 
   await prisma.$transaction([
     prisma.studySession.create({
@@ -339,7 +419,7 @@ export async function logStudySession(input: {
           : {}),
       },
     }),
-    activityUpsert(user.id, now),
+    activityUpsert(user.id, sessionDate),
   ]);
 
   revalidatePath("/");
@@ -356,6 +436,7 @@ export async function updateUserSettings(input: {
   weeklyTargetTopics?: number;
   weeklyTargetMcqs?: number;
   targetScore?: number;
+  cutoffCategory?: string;
   reminderTime?: string | null;
   reminderOffset?: number;
 }) {
@@ -372,6 +453,9 @@ export async function updateUserSettings(input: {
       : {}),
     ...(input.targetScore !== undefined
       ? { targetScore: input.targetScore }
+      : {}),
+    ...(input.cutoffCategory !== undefined
+      ? { cutoffCategory: input.cutoffCategory }
       : {}),
     ...(input.reminderTime !== undefined
       ? { reminderTime: input.reminderTime }

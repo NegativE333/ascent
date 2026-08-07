@@ -101,6 +101,8 @@ model UserSettings {
   weeklyTargetMcqs   Int       @default(100) @map("weekly_target_mcqs")
   /** Tier 1 marks you're aiming for, used for the score projection. */
   targetScore        Int       @default(150) @map("target_score")
+  /** Planning cutoff band: ur | ews | obc | sc | st | custom. */
+  cutoffCategory     String    @default("ur") @map("cutoff_category")
   /** Local time for the daily nudge, as "HH:mm". */
   reminderTime       String?   @map("reminder_time")
   /** Minutes offset from UTC, so the cron can resolve the user's local time. */

@@ -19,6 +19,8 @@ import {
   CONFIDENCE_INTERVAL_FACTOR,
   MOCK_SECTIONS,
   REVIEW_INTERVALS,
+  TIER1_CUTOFFS,
+  type CutoffCategory,
 } from "@/lib/types";
 
 /** Used when a topic predates the seeded time estimates. */
@@ -122,6 +124,96 @@ export function weakTopics(topics: TopicWithSubject[]): TopicWithSubject[] {
     .sort((a, b) => a.confidence - b.confidence);
 }
 
+export type DrillItem = {
+  topic: TopicWithSubject;
+  reason: string;
+  /** Lower = more urgent. */
+  score: number;
+};
+
+/**
+ * Practice queue from low confidence, weak mock sections, and poor topic
+ * accuracy — ordered so "Practice next" always points at the highest leverage.
+ */
+export function drillQueue(input: {
+  topics: TopicWithSubject[];
+  sessions: McqSession[];
+  mocks: MockTest[];
+}): DrillItem[] {
+  const { topics, sessions, mocks } = input;
+
+  const weakSlugs = new Set(
+    sectionalPerformance(mocks)
+      .filter((s) => s.mocks > 0)
+      .sort((a, b) => a.avgNet - b.avgNet)
+      .slice(0, 2)
+      .map((s) => s.slug)
+  );
+
+  const byTopic = new Map<string, { correct: number; total: number }>();
+  for (const s of sessions) {
+    const cur = byTopic.get(s.topic_id) ?? { correct: 0, total: 0 };
+    cur.correct += s.correct_answers;
+    cur.total += s.total_questions;
+    byTopic.set(s.topic_id, cur);
+  }
+
+  const items: DrillItem[] = [];
+
+  for (const topic of topics) {
+    if (topic.status === "not_started" && !topic.last_practiced_at) continue;
+
+    let score = Number.POSITIVE_INFINITY;
+    let reason = "";
+
+    if (topic.confidence <= 2 && topic.last_practiced_at) {
+      score = topic.confidence;
+      reason = `Confidence ${topic.confidence}/5`;
+    }
+
+    const stats = byTopic.get(topic.id);
+    if (stats && stats.total >= 10) {
+      const acc = Math.round((stats.correct / stats.total) * 100);
+      if (acc < 70) {
+        const next = 2 + (70 - acc) / 20;
+        if (next < score) {
+          score = next;
+          reason = `${acc}% accuracy on ${stats.total} Qs`;
+        }
+      }
+    }
+
+    const slug = topic.subjects?.slug;
+    if (slug && weakSlugs.has(slug) && topic.status !== "not_started") {
+      const next = Math.min(score, 3 + topic.confidence * 0.25);
+      if (next < score || !reason) {
+        score = next;
+        reason = reason
+          ? `${reason} · weak mock section`
+          : "In a weak mock section";
+      }
+    }
+
+    if (
+      topic.priority === "high" &&
+      topic.confidence <= 3 &&
+      topic.status !== "done"
+    ) {
+      const next = Math.min(score, 2.5 + topic.confidence * 0.2);
+      if (next < score || !reason) {
+        score = next;
+        reason = reason || "High priority · low confidence";
+      }
+    }
+
+    if (Number.isFinite(score) && reason) {
+      items.push({ topic, reason, score });
+    }
+  }
+
+  return items.sort((a, b) => a.score - b.score || a.topic.confidence - b.topic.confidence);
+}
+
 export function accuracy(
   session: Pick<McqSession, "correct_answers" | "total_questions">
 ) {
@@ -137,16 +229,27 @@ export function netScore(
   return Number((session.correct_answers - 0.5 * wrong).toFixed(1));
 }
 
+export type HeatmapCell = {
+  date: string;
+  count: number;
+  questions: number;
+  studyMinutes: number;
+};
+
 export function buildHeatmap(
   sessions: McqSession[],
-  days = 119
-): { date: string; count: number; questions: number }[] {
+  days = 119,
+  study: StudySession[] = []
+): HeatmapCell[] {
   const end = new Date();
-  const map = new Map<string, { count: number; questions: number }>();
+  const map = new Map<
+    string,
+    { count: number; questions: number; studyMinutes: number }
+  >();
 
   for (let i = 0; i < days; i++) {
     const d = format(subDays(end, days - 1 - i), "yyyy-MM-dd");
-    map.set(d, { count: 0, questions: 0 });
+    map.set(d, { count: 0, questions: 0, studyMinutes: 0 });
   }
 
   for (const s of sessions) {
@@ -157,10 +260,19 @@ export function buildHeatmap(
     cur.questions += s.total_questions;
   }
 
+  for (const s of study) {
+    const key = s.session_date;
+    if (!map.has(key)) continue;
+    const cur = map.get(key)!;
+    cur.count += 1;
+    cur.studyMinutes += s.minutes;
+  }
+
   return Array.from(map.entries()).map(([date, v]) => ({
     date,
     count: v.count,
     questions: v.questions,
+    studyMinutes: v.studyMinutes,
   }));
 }
 
@@ -246,9 +358,10 @@ export type ReviewItem = {
 };
 
 /** Every started topic with its next scheduled review, soonest due first. */
-export function reviewSchedule(topics: TopicWithSubject[]): ReviewItem[] {
-  const today = new Date();
-
+export function reviewSchedule(
+  topics: TopicWithSubject[],
+  asOf: Date = new Date()
+): ReviewItem[] {
   return topics
     .filter((t) => t.status !== "not_started")
     .flatMap((topic) => {
@@ -263,7 +376,7 @@ export function reviewSchedule(topics: TopicWithSubject[]): ReviewItem[] {
           topic,
           intervalDays,
           dueDate: format(due, "yyyy-MM-dd"),
-          daysOverdue: differenceInCalendarDays(today, due),
+          daysOverdue: differenceInCalendarDays(asOf, due),
           stage: Math.min(topic.review_count, REVIEW_INTERVALS.length - 1),
         },
       ];
@@ -282,11 +395,14 @@ export function needsRevision(topic: Topic): boolean {
   return differenceInCalendarDays(new Date(), due) >= 0;
 }
 
-export function revisionQueue(topics: TopicWithSubject[]): {
+export function revisionQueue(
+  topics: TopicWithSubject[],
+  asOf: Date = new Date()
+): {
   due: ReviewItem[];
   upcoming: ReviewItem[];
 } {
-  const schedule = reviewSchedule(topics);
+  const schedule = reviewSchedule(topics, asOf);
   return {
     due: schedule.filter((i) => i.daysOverdue >= 0),
     upcoming: schedule
@@ -335,10 +451,16 @@ export type PaceProjection = {
   status: "on_pace" | "behind" | "ahead";
 };
 
+/** Leave this many days before the exam for revision/mocks. */
+const EXAM_BUFFER_DAYS = 30;
+
 export type ExamPace = {
   daysLeft: number | null;
   status: PaceStatus;
-  /** Assumes you study every day from now on — the best case. */
+  /**
+   * Daily study load needed to finish the syllabus one month before the exam
+   * (or by the exam date if less than a month remains).
+   */
   ifDaily: PaceProjection | null;
   /** Extrapolates your real calendar rate, rest days included. */
   atCurrentHabits: PaceProjection | null;
@@ -398,38 +520,51 @@ export function examPace(
   if (remainingTopics === 0) return { ...empty, status: "done" };
   if (!settings?.exam_date) return { ...empty, status: "no_exam" };
 
-  const activeDays = new Set(activityDates).size;
-  if (progress.doneMinutes === 0 || activeDays === 0) return empty;
-
-  // Weighted by estimated study time, so 15 quick GA facts no longer count the
-  // same as 15 Quant chapters.
-  const doneHours = progress.doneMinutes / 60;
   const remainingHours = progress.remainingMinutes / 60;
+  if (remainingHours <= 0) return empty;
 
-  // Best case: rate measured per seven days of actual studying.
-  const dailyRate = doneHours / Math.max(activeDays / 7, 1 / 7);
-
-  // Realistic: same work spread over the calendar time it really took.
-  const firstActive = activityDates.slice().sort()[0];
-  const elapsedDays =
-    differenceInCalendarDays(new Date(), parseISO(firstActive)) + 1;
-  const calendarWeeks = Math.max(1, elapsedDays / 7);
-  const habitRate = doneHours / calendarWeeks;
-
-  const atCurrentHabits = project(
+  // Prescription: study every day hard enough to clear the syllabus one month
+  // before the exam, leaving that last month for mocks and revision.
+  const exam = parseISO(settings.exam_date);
+  const earlyTarget = subDays(exam, EXAM_BUFFER_DAYS);
+  const daysToEarly = differenceInCalendarDays(earlyTarget, new Date());
+  const planningDays =
+    daysToEarly > 0
+      ? daysToEarly
+      : Math.max(1, differenceInCalendarDays(exam, new Date()));
+  const requiredHoursPerWeek = (remainingHours / planningDays) * 7;
+  const ifDaily = project(
     remainingHours,
-    habitRate,
+    requiredHoursPerWeek,
     settings.exam_date
   );
 
+  const activeDays = new Set(activityDates).size;
+  let atCurrentHabits: PaceProjection | null = null;
+  let studyDaysPerWeek = 0;
+
+  if (progress.doneMinutes > 0 && activeDays > 0) {
+    const doneHours = progress.doneMinutes / 60;
+    const firstActive = activityDates.slice().sort()[0];
+    const elapsedDays =
+      differenceInCalendarDays(new Date(), parseISO(firstActive)) + 1;
+    const calendarWeeks = Math.max(1, elapsedDays / 7);
+    atCurrentHabits = project(
+      remainingHours,
+      doneHours / calendarWeeks,
+      settings.exam_date
+    );
+    studyDaysPerWeek = Number(
+      Math.min(7, activeDays / calendarWeeks).toFixed(1)
+    );
+  }
+
   return {
     daysLeft,
-    status: atCurrentHabits?.status ?? "no_data",
-    ifDaily: project(remainingHours, dailyRate, settings.exam_date),
+    status: atCurrentHabits?.status ?? ifDaily?.status ?? "no_data",
+    ifDaily,
     atCurrentHabits,
-    studyDaysPerWeek: Number(
-      Math.min(7, activeDays / calendarWeeks).toFixed(1)
-    ),
+    studyDaysPerWeek,
     remainingMinutes: progress.remainingMinutes,
     remainingTopics,
   };
@@ -587,41 +722,66 @@ export type DailyPlanItem = {
   href: string | null;
   minutes: number;
   done: boolean;
+  /** Left unfinished yesterday and surfaced again today. */
+  carryover?: boolean;
 };
 
-/**
- * A short, fixed list that defines "done for today". Completion is derived from
- * what you actually logged, so there's no separate checklist to keep in sync.
- */
-export function dailyPlan(input: {
+export type EndOfDayWrap = {
+  allDone: boolean;
+  slipped: DailyPlanItem[];
+  remainingMinutes: number;
+};
+
+/** What still stands between you and "done for today". */
+export function endOfDayWrap(plan: {
+  items: DailyPlanItem[];
+  doneCount: number;
+}): EndOfDayWrap {
+  const slipped = plan.items.filter((item) => !item.done);
+  return {
+    allDone: plan.items.length > 0 && slipped.length === 0,
+    slipped,
+    remainingMinutes: slipped.reduce((sum, item) => sum + item.minutes, 0),
+  };
+}
+
+function planItemsForDate(input: {
   topics: TopicWithSubject[];
   sessions: McqSession[];
   study: StudySession[];
   settings: UserSettings | null;
-}): { items: DailyPlanItem[]; doneCount: number; minutes: number } {
-  const { topics, sessions, study, settings } = input;
-  const today = format(new Date(), "yyyy-MM-dd");
-  const isToday = (iso: string | null) =>
-    Boolean(iso && iso.slice(0, 10) === today);
+  asOf: Date;
+}): DailyPlanItem[] {
+  const { topics, sessions, study, settings, asOf } = input;
+  const day = format(asOf, "yyyy-MM-dd");
+  // Timestamps are UTC ISO; compare in local time so IST evenings/nights
+  // still count as "today" for the plan checklist.
+  const onDay = (iso: string | null) =>
+    Boolean(iso && format(parseISO(iso), "yyyy-MM-dd") === day);
 
   const items: DailyPlanItem[] = [];
+  const reviseTopicIds = new Set<string>();
 
-  // Revisions — show ones already cleared today so the list stays stable
-  const revisedToday = topics.filter((t) => isToday(t.last_revised_at));
-  const due = revisionQueue(topics).due;
+  // Keep revised topics on the list as done (so 1/4 stays 1/4, not 0/3)
+  const revisedThatDay = topics.filter((t) => onDay(t.last_revised_at));
+  const due = revisionQueue(topics, asOf).due.filter(
+    (item) => !onDay(item.topic.last_revised_at)
+  );
 
-  for (const topic of revisedToday.slice(0, 2)) {
+  for (const topic of revisedThatDay.slice(0, 2)) {
+    reviseTopicIds.add(topic.id);
     items.push({
       id: `revise-${topic.id}`,
       kind: "revise",
       title: `Revise ${topic.name}`,
-      detail: topic.subjects?.name ?? "",
+      detail: `Done today · ${topic.subjects?.name ?? ""}`,
       href: `/syllabus/${topic.id}`,
       minutes: REVISE_BLOCK_MINUTES,
       done: true,
     });
   }
   for (const item of due.slice(0, Math.max(0, 2 - items.length))) {
+    reviseTopicIds.add(item.topic.id);
     items.push({
       id: `revise-${item.topic.id}`,
       kind: "revise",
@@ -636,51 +796,50 @@ export function dailyPlan(input: {
     });
   }
 
-  // One topic to move forward
-  const studiedTodayIds = new Set([
-    ...study.filter((s) => s.session_date === today).map((s) => s.topic_id),
-    ...sessions.filter((s) => s.session_date === today).map((s) => s.topic_id),
+  const studiedThatDayIds = new Set([
+    ...study.filter((s) => s.session_date === day).map((s) => s.topic_id),
+    ...sessions.filter((s) => s.session_date === day).map((s) => s.topic_id),
   ]);
-  const studiedToday = topics.find((t) => studiedTodayIds.has(t.id));
 
-  const nextTopic =
-    studiedToday ??
-    topics
-      .filter((t) => t.status === "in_progress")
+  // Don't ask to "study" a topic that's already on today's revise list
+  const studiedThatDay = topics.find(
+    (t) => studiedThatDayIds.has(t.id) && !reviseTopicIds.has(t.id)
+  );
+
+  const pickStudy = (pool: TopicWithSubject[]) =>
+    pool
+      .filter((t) => !reviseTopicIds.has(t.id))
       .sort(
         (a, b) =>
           a.confidence - b.confidence ||
-          priorityRank[a.priority] - priorityRank[b.priority]
-      )[0] ??
-    topics
-      .filter((t) => t.status === "not_started")
-      .sort(
-        (a, b) =>
           priorityRank[a.priority] - priorityRank[b.priority] ||
           a.display_order - b.display_order
       )[0];
 
+  const nextTopic =
+    studiedThatDay ??
+    pickStudy(topics.filter((t) => t.status === "in_progress")) ??
+    pickStudy(topics.filter((t) => t.status === "not_started"));
+
   if (nextTopic) {
+    const done = studiedThatDayIds.has(nextTopic.id);
     items.push({
       id: `study-${nextTopic.id}`,
       kind: "study",
-      title: studiedToday
-        ? `Studied ${nextTopic.name}`
-        : `Study ${nextTopic.name}`,
+      title: done ? `Studied ${nextTopic.name}` : `Study ${nextTopic.name}`,
       detail: `${nextTopic.subjects?.name} · ~${hoursLabel(topicMinutes(nextTopic))} total`,
       href: `/syllabus/${nextTopic.id}`,
       minutes: Math.min(STUDY_BLOCK_MINUTES, topicMinutes(nextTopic)),
-      done: Boolean(studiedToday),
+      done,
     });
   }
 
-  // Daily share of the weekly question target
   const goal = Math.max(
     10,
     Math.ceil((settings?.weekly_target_mcqs ?? 100) / 7)
   );
   const answered = sessions
-    .filter((s) => s.session_date === today)
+    .filter((s) => s.session_date === day)
     .reduce((sum, s) => sum + s.total_questions, 0);
 
   items.push({
@@ -695,6 +854,87 @@ export function dailyPlan(input: {
     minutes: goal,
     done: answered >= goal,
   });
+
+  return items;
+}
+
+/**
+ * A short, fixed list that defines "done for today". Completion is derived from
+ * what you actually logged, so there's no separate checklist to keep in sync.
+ * One unfinished item from yesterday is surfaced at the top when it isn't
+ * already on today's list.
+ */
+export function dailyPlan(input: {
+  topics: TopicWithSubject[];
+  sessions: McqSession[];
+  study: StudySession[];
+  settings: UserSettings | null;
+}): { items: DailyPlanItem[]; doneCount: number; minutes: number } {
+  const now = new Date();
+  const today = format(now, "yyyy-MM-dd");
+  const items = planItemsForDate({ ...input, asOf: now });
+
+  const yesterdayItems = planItemsForDate({
+    ...input,
+    asOf: subDays(now, 1),
+  });
+  const slipped = yesterdayItems.filter(
+    (item) => !item.done && item.kind !== "practice"
+  );
+
+  const todayIds = new Set(items.map((item) => item.id));
+
+  // Prefer marking an existing today item as carryover, else prepend one
+  let tagged = false;
+  for (const item of items) {
+    if (!item.done && slipped.some((s) => s.id === item.id)) {
+      item.carryover = true;
+      item.detail = `Left from yesterday · ${item.detail}`;
+      tagged = true;
+      // Move it to the front
+      const idx = items.indexOf(item);
+      if (idx > 0) {
+        items.splice(idx, 1);
+        items.unshift(item);
+      }
+      break;
+    }
+  }
+
+  if (!tagged) {
+    const carry = slipped.find((item) => !todayIds.has(item.id));
+    if (carry) {
+      const topicId =
+        carry.kind === "revise" || carry.kind === "study"
+          ? carry.id.replace(/^(revise|study)-/, "")
+          : null;
+      const doneToday = topicId
+        ? input.study.some(
+            (s) => s.topic_id === topicId && s.session_date === today
+          ) ||
+          input.sessions.some(
+            (s) => s.topic_id === topicId && s.session_date === today
+          ) ||
+          input.topics.some(
+            (t) =>
+              t.id === topicId &&
+              Boolean(
+                t.last_revised_at &&
+                  format(parseISO(t.last_revised_at), "yyyy-MM-dd") === today
+              )
+          )
+        : false;
+
+      items.unshift({
+        ...carry,
+        id: `carryover-${carry.id}`,
+        title: carry.title,
+        detail: `Left from yesterday · ${carry.detail}`,
+        carryover: true,
+        done: doneToday,
+      });
+    }
+  }
 
   return {
     items,
@@ -1016,6 +1256,8 @@ export type ScoreProjection = {
   expected: number;
   target: number;
   gap: number;
+  cutoffCategory: CutoffCategory;
+  cutoffs: typeof TIER1_CUTOFFS;
   sections: ScoreSection[];
   bestLeverage: ScoreSection | null;
   confidence: "low" | "medium" | "high";
@@ -1114,7 +1356,12 @@ export function projectedScore(input: {
   const expected = Number(
     sections.reduce((sum, s) => sum + s.expectedMarks, 0).toFixed(1)
   );
-  const target = settings?.target_score ?? 150;
+  const cutoffCategory = settings?.cutoff_category ?? "ur";
+  const preset = TIER1_CUTOFFS.find((c) => c.id === cutoffCategory);
+  const target =
+    cutoffCategory === "custom"
+      ? (settings?.target_score ?? 150)
+      : (preset?.score ?? settings?.target_score ?? 150);
 
   const withLeverage = sections.filter((s) => s.marksPerHour !== null);
   const bestLeverage =
@@ -1140,6 +1387,8 @@ export function projectedScore(input: {
     expected,
     target,
     gap: Number((target - expected).toFixed(1)),
+    cutoffCategory,
+    cutoffs: TIER1_CUTOFFS,
     sections,
     bestLeverage,
     confidence,

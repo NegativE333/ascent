@@ -1,7 +1,15 @@
 "use client";
 
+import { useTransition } from "react";
+import { toast } from "sonner";
+import { updateUserSettings } from "@/lib/actions";
 import { TIER1_TOTAL_MARKS, type ScoreProjection } from "@/lib/stats";
-import { SUBJECT_COLORS } from "@/lib/types";
+import {
+  SUBJECT_COLORS,
+  TIER1_CUTOFFS,
+  type CutoffCategory,
+} from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const CONFIDENCE_NOTE: Record<ScoreProjection["confidence"], string> = {
   low: "Rough guess — log a mock with sectional marks to sharpen it.",
@@ -20,13 +28,39 @@ export function ScoreProjectionPanel({
 }: {
   projection: ScoreProjection;
 }) {
-  const { expected, target, gap, sections, bestLeverage, confidence } =
-    projection;
+  const [pending, startTransition] = useTransition();
+  const {
+    expected,
+    target,
+    gap,
+    cutoffCategory,
+    cutoffs,
+    sections,
+    bestLeverage,
+    confidence,
+  } = projection;
+
   const pct = Math.min(100, Math.round((expected / TIER1_TOTAL_MARKS) * 100));
   const targetPct = Math.min(
     100,
     Math.round((target / TIER1_TOTAL_MARKS) * 100)
   );
+
+  function selectCutoff(id: CutoffCategory) {
+    const preset = TIER1_CUTOFFS.find((c) => c.id === id);
+    if (!preset) return;
+    startTransition(async () => {
+      try {
+        await updateUserSettings({
+          cutoffCategory: id,
+          targetScore: preset.score,
+        });
+        toast.success(`Target set to ${preset.label} (~${preset.score})`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Update failed");
+      }
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -47,8 +81,8 @@ export function ScoreProjectionPanel({
             className={`text-sm ${gap > 0 ? "text-tag-revise-fg" : "text-success"}`}
           >
             {gap > 0
-              ? `${gap} marks short of your ${target} target`
-              : `${Math.abs(gap)} marks above your ${target} target`}
+              ? `${gap} marks short of ${target}`
+              : `${Math.abs(gap)} marks above ${target}`}
           </p>
         </div>
 
@@ -57,14 +91,52 @@ export function ScoreProjectionPanel({
             className="h-full rounded-[3px]"
             style={{ width: `${pct}%`, backgroundColor: "var(--primary)" }}
           />
+          {cutoffs.map((c) => {
+            const left = Math.min(
+              100,
+              Math.round((c.score / TIER1_TOTAL_MARKS) * 100)
+            );
+            const active = cutoffCategory === c.id;
+            return (
+              <div
+                key={c.id}
+                className={cn(
+                  "absolute top-0 h-full w-px",
+                  active ? "bg-foreground" : "bg-foreground/25"
+                )}
+                style={{ left: `${left}%` }}
+                title={`${c.label} ~${c.score}`}
+              />
+            );
+          })}
           <div
-            className="absolute top-0 h-full w-0.5 bg-foreground/50"
+            className="absolute top-0 h-full w-0.5 bg-foreground"
             style={{ left: `${targetPct}%` }}
             title={`Target ${target}`}
           />
         </div>
 
+        <div className="mt-3 flex flex-wrap gap-1">
+          {cutoffs.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              disabled={pending}
+              onClick={() => selectCutoff(c.id)}
+              className={cn(
+                "rounded-[4px] px-2 py-1 text-[11px] font-medium transition-colors",
+                cutoffCategory === c.id
+                  ? "bg-foreground text-background"
+                  : "bg-surface-hover text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {c.label} · {c.score}
+            </button>
+          ))}
+        </div>
+
         <p className="mt-2 text-[11px] text-muted-foreground">
+          Planning cutoffs only — real cutoffs vary by year and post.{" "}
           {CONFIDENCE_NOTE[confidence]}
         </p>
       </div>

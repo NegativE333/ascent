@@ -58,6 +58,8 @@ export type TopicWithSubject = Topic & {
   subjects: Subject;
 };
 
+export type CutoffCategory = "ur" | "ews" | "obc" | "sc" | "st" | "custom";
+
 export type UserSettings = {
   id: string;
   user_id: string;
@@ -65,10 +67,27 @@ export type UserSettings = {
   weekly_target_topics: number;
   weekly_target_mcqs: number;
   target_score: number;
+  cutoff_category: CutoffCategory;
   reminder_time: string | null;
   reminder_offset: number;
   seen_milestones: string[];
 };
+
+/**
+ * Approximate Tier 1 planning cutoffs (not official; years and posts vary).
+ * Used as the default target when you pick a category.
+ */
+export const TIER1_CUTOFFS: {
+  id: Exclude<CutoffCategory, "custom">;
+  label: string;
+  score: number;
+}[] = [
+  { id: "ur", label: "UR", score: 150 },
+  { id: "ews", label: "EWS", score: 146 },
+  { id: "obc", label: "OBC", score: 142 },
+  { id: "sc", label: "SC", score: 120 },
+  { id: "st", label: "ST", score: 110 },
+];
 
 export type MockSectionScore = {
   correct: number;

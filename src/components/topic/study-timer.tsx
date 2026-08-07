@@ -113,7 +113,8 @@ export function StudyTimer({
 
     startTransition(async () => {
       try {
-        await logStudySession({ topicId, minutes });
+        const sessionDate = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD local
+        await logStudySession({ topicId, minutes, sessionDate });
         toast.success(`Logged ${minutes} min on ${topicName}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not log time");
