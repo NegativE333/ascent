@@ -9,45 +9,84 @@ import {
 import type {
   McqSession,
   MockTest,
+  StudySession,
   Subject,
   Topic,
   TopicWithSubject,
   UserSettings,
 } from "@/lib/types";
-import { REVISION_DAYS } from "@/lib/types";
+import {
+  CONFIDENCE_INTERVAL_FACTOR,
+  MOCK_SECTIONS,
+  REVIEW_INTERVALS,
+} from "@/lib/types";
+
+/** Used when a topic predates the seeded time estimates. */
+const FALLBACK_TOPIC_MINUTES = 60;
+
+/** Estimated study time for one topic, in minutes. */
+export function topicMinutes(topic: Pick<Topic, "estimated_minutes">): number {
+  return topic.estimated_minutes > 0
+    ? topic.estimated_minutes
+    : FALLBACK_TOPIC_MINUTES;
+}
+
+function totalMinutes(topics: Pick<Topic, "estimated_minutes">[]): number {
+  return topics.reduce((sum, t) => sum + topicMinutes(t), 0);
+}
+
+export function hoursLabel(minutes: number): string {
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  return hours >= 10 ? `${Math.round(hours)}h` : `${hours.toFixed(1)}h`;
+}
+
+/**
+ * Progress by study time rather than topic count, since a 20-minute GA fact and
+ * an 8-hour Geometry chapter are not the same unit of work.
+ */
+export type WeightedProgress = {
+  done: number;
+  total: number;
+  percent: number;
+  doneMinutes: number;
+  totalMinutes: number;
+  remainingMinutes: number;
+};
+
+export function topicsProgress(topics: Topic[]): WeightedProgress {
+  const doneTopics = topics.filter((t) => t.status === "done");
+  const total = totalMinutes(topics);
+  const doneMins = totalMinutes(doneTopics);
+
+  return {
+    done: doneTopics.length,
+    total: topics.length,
+    percent: total === 0 ? 0 : Math.round((doneMins / total) * 100),
+    doneMinutes: doneMins,
+    totalMinutes: total,
+    remainingMinutes: total - doneMins,
+  };
+}
 
 export function completionPercent(topics: Topic[]): number {
-  if (topics.length === 0) return 0;
-  const done = topics.filter((t) => t.status === "done").length;
-  return Math.round((done / topics.length) * 100);
+  return topicsProgress(topics).percent;
 }
 
 export function subjectProgress(
   topics: Topic[],
   subjects: Subject[]
-): { subject: Subject; percent: number; done: number; total: number }[] {
+): ({ subject: Subject } & WeightedProgress)[] {
   return subjects
     .slice()
     .sort((a, b) => a.display_order - b.display_order)
-    .map((subject) => {
-      const subjectTopics = topics.filter((t) => t.subject_id === subject.id);
-      const done = subjectTopics.filter((t) => t.status === "done").length;
-      const total = subjectTopics.length;
-      return {
-        subject,
-        done,
-        total,
-        percent: total === 0 ? 0 : Math.round((done / total) * 100),
-      };
-    });
+    .map((subject) => ({
+      subject,
+      ...topicsProgress(topics.filter((t) => t.subject_id === subject.id)),
+    }));
 }
 
-export type SectionProgress = {
-  section: string;
-  done: number;
-  total: number;
-  percent: number;
-};
+export type SectionProgress = { section: string } & WeightedProgress;
 
 /** Progress per main topic/section within a subject (e.g. Geography under GA). */
 export function sectionProgress(
@@ -71,17 +110,10 @@ export function sectionProgress(
       ]
     : [...bySection.keys()].sort();
 
-  return names.map((section) => {
-    const rows = bySection.get(section) ?? [];
-    const done = rows.filter((t) => t.status === "done").length;
-    const total = rows.length;
-    return {
-      section,
-      done,
-      total,
-      percent: total === 0 ? 0 : Math.round((done / total) * 100),
-    };
-  });
+  return names.map((section) => ({
+    section,
+    ...topicsProgress(bySection.get(section) ?? []),
+  }));
 }
 
 export function weakTopics(topics: TopicWithSubject[]): TopicWithSubject[] {
@@ -179,26 +211,92 @@ export function longestStreak(sessions: McqSession[]): number {
   return streakFromDays(sessions.map((s) => s.session_date)).longest;
 }
 
-export function needsRevision(topic: Topic, days = REVISION_DAYS): boolean {
-  if (topic.status !== "done" || !topic.last_practiced_at) return false;
-  const last = parseISO(topic.last_practiced_at);
-  return differenceInCalendarDays(new Date(), last) >= days;
+/** Days to wait before the next review, from review stage + confidence. */
+export function reviewInterval(topic: Pick<Topic, "review_count" | "confidence">) {
+  const stage = Math.min(
+    Math.max(topic.review_count, 0),
+    REVIEW_INTERVALS.length - 1
+  );
+  const base = REVIEW_INTERVALS[stage];
+  const factor = CONFIDENCE_INTERVAL_FACTOR[topic.confidence] ?? 1;
+  return Math.max(1, Math.round(base * factor));
+}
+
+/** Last time the topic was touched in a way that counts as studying it. */
+function lastStudiedAt(topic: Topic): Date | null {
+  const candidates = [
+    topic.last_revised_at,
+    topic.last_practiced_at,
+    topic.status === "done" ? topic.status_updated_at : null,
+  ].filter((d): d is string => Boolean(d));
+
+  if (candidates.length === 0) return null;
+  return candidates
+    .map((d) => parseISO(d))
+    .reduce((latest, d) => (d > latest ? d : latest));
+}
+
+export type ReviewItem = {
+  topic: TopicWithSubject;
+  intervalDays: number;
+  dueDate: string;
+  /** Positive when late, 0 when due today, negative when still scheduled. */
+  daysOverdue: number;
+  stage: number;
+};
+
+/** Every started topic with its next scheduled review, soonest due first. */
+export function reviewSchedule(topics: TopicWithSubject[]): ReviewItem[] {
+  const today = new Date();
+
+  return topics
+    .filter((t) => t.status !== "not_started")
+    .flatMap((topic) => {
+      const studied = lastStudiedAt(topic);
+      if (!studied) return [];
+
+      const intervalDays = reviewInterval(topic);
+      const due = addDays(studied, intervalDays);
+
+      return [
+        {
+          topic,
+          intervalDays,
+          dueDate: format(due, "yyyy-MM-dd"),
+          daysOverdue: differenceInCalendarDays(today, due),
+          stage: Math.min(topic.review_count, REVIEW_INTERVALS.length - 1),
+        },
+      ];
+    })
+    .sort((a, b) => {
+      if (b.daysOverdue !== a.daysOverdue) return b.daysOverdue - a.daysOverdue;
+      return a.topic.confidence - b.topic.confidence;
+    });
+}
+
+export function needsRevision(topic: Topic): boolean {
+  if (topic.status === "not_started") return false;
+  const studied = lastStudiedAt(topic);
+  if (!studied) return false;
+  const due = addDays(studied, reviewInterval(topic));
+  return differenceInCalendarDays(new Date(), due) >= 0;
+}
+
+export function revisionQueue(topics: TopicWithSubject[]): {
+  due: ReviewItem[];
+  upcoming: ReviewItem[];
+} {
+  const schedule = reviewSchedule(topics);
+  return {
+    due: schedule.filter((i) => i.daysOverdue >= 0),
+    upcoming: schedule
+      .filter((i) => i.daysOverdue < 0)
+      .sort((a, b) => b.daysOverdue - a.daysOverdue),
+  };
 }
 
 export function revisionTopics(topics: TopicWithSubject[]): TopicWithSubject[] {
-  return topics
-    .filter((t) => needsRevision(t))
-    .sort((a, b) => {
-      const aDays = differenceInCalendarDays(
-        new Date(),
-        parseISO(a.last_practiced_at!)
-      );
-      const bDays = differenceInCalendarDays(
-        new Date(),
-        parseISO(b.last_practiced_at!)
-      );
-      return bDays - aDays;
-    });
+  return revisionQueue(topics).due.map((i) => i.topic);
 }
 
 const priorityRank = { high: 0, medium: 1, low: 2 };
@@ -220,78 +318,128 @@ export function todaysFocus(topics: TopicWithSubject[]): {
   return { revise, next };
 }
 
-export function examPace(
-  topics: Topic[],
-  settings: UserSettings | null,
-  activityDates: string[]
-): {
+export type PaceStatus =
+  | "no_exam"
+  | "done"
+  | "no_data"
+  | "on_pace"
+  | "behind"
+  | "ahead";
+
+export type PaceProjection = {
+  /** Study hours per week this projection extrapolates from. */
+  hoursPerWeek: number;
+  projectedDate: string;
+  /** Days between the projected finish and the exam; positive means too late. */
+  daysDelta: number;
+  status: "on_pace" | "behind" | "ahead";
+};
+
+export type ExamPace = {
   daysLeft: number | null;
-  projectedDate: string | null;
-  status: "no_exam" | "on_pace" | "behind" | "ahead" | "done" | "no_data";
-  daysDelta: number | null;
-  topicsPerWeek: number;
-} {
-  const remaining = topics.filter((t) => t.status !== "done").length;
-  if (remaining === 0) {
-    return {
-      daysLeft: settings?.exam_date
-        ? differenceInCalendarDays(parseISO(settings.exam_date), new Date())
-        : null,
-      projectedDate: format(new Date(), "yyyy-MM-dd"),
-      status: "done",
-      daysDelta: 0,
-      topicsPerWeek: 0,
-    };
-  }
+  status: PaceStatus;
+  /** Assumes you study every day from now on — the best case. */
+  ifDaily: PaceProjection | null;
+  /** Extrapolates your real calendar rate, rest days included. */
+  atCurrentHabits: PaceProjection | null;
+  /** How many days a week you actually show up, on average. */
+  studyDaysPerWeek: number;
+  /** Estimated study time still ahead of you. */
+  remainingMinutes: number;
+  remainingTopics: number;
+};
 
-  if (!settings?.exam_date) {
-    return {
-      daysLeft: null,
-      projectedDate: null,
-      status: "no_exam",
-      daysDelta: null,
-      topicsPerWeek: 0,
-    };
-  }
+function project(
+  remainingHours: number,
+  hoursPerWeek: number,
+  examDate: string
+): PaceProjection | null {
+  if (hoursPerWeek <= 0) return null;
 
-  const daysLeft = differenceInCalendarDays(
-    parseISO(settings.exam_date),
-    new Date()
+  const projected = addDays(
+    new Date(),
+    Math.ceil((remainingHours / hoursPerWeek) * 7)
   );
-  const done = topics.filter((t) => t.status === "done").length;
-  const uniqueDays = new Set(activityDates).size;
-  const weeksActive = Math.max(uniqueDays / 7, 1 / 7);
-  const topicsPerWeek = done > 0 ? done / weeksActive : 0;
-
-  if (topicsPerWeek <= 0) {
-    return {
-      daysLeft,
-      projectedDate: null,
-      status: "no_data",
-      daysDelta: null,
-      topicsPerWeek: 0,
-    };
-  }
-
-  const weeksNeeded = remaining / topicsPerWeek;
-  const projected = addDays(new Date(), Math.ceil(weeksNeeded * 7));
-  const projectedDate = format(projected, "yyyy-MM-dd");
-  const daysDelta = differenceInCalendarDays(
-    projected,
-    parseISO(settings.exam_date)
-  );
+  const daysDelta = differenceInCalendarDays(projected, parseISO(examDate));
 
   let status: "on_pace" | "behind" | "ahead" = "on_pace";
   if (daysDelta > 3) status = "behind";
   else if (daysDelta < -3) status = "ahead";
 
-  return { daysLeft, projectedDate, status, daysDelta, topicsPerWeek };
+  return {
+    hoursPerWeek: Number(hoursPerWeek.toFixed(1)),
+    projectedDate: format(projected, "yyyy-MM-dd"),
+    daysDelta,
+    status,
+  };
+}
+
+export function examPace(
+  topics: Topic[],
+  settings: UserSettings | null,
+  activityDates: string[]
+): ExamPace {
+  const progress = topicsProgress(topics);
+  const remainingTopics = progress.total - progress.done;
+  const daysLeft = settings?.exam_date
+    ? differenceInCalendarDays(parseISO(settings.exam_date), new Date())
+    : null;
+
+  const empty: ExamPace = {
+    daysLeft,
+    status: "no_data",
+    ifDaily: null,
+    atCurrentHabits: null,
+    studyDaysPerWeek: 0,
+    remainingMinutes: progress.remainingMinutes,
+    remainingTopics,
+  };
+
+  if (remainingTopics === 0) return { ...empty, status: "done" };
+  if (!settings?.exam_date) return { ...empty, status: "no_exam" };
+
+  const activeDays = new Set(activityDates).size;
+  if (progress.doneMinutes === 0 || activeDays === 0) return empty;
+
+  // Weighted by estimated study time, so 15 quick GA facts no longer count the
+  // same as 15 Quant chapters.
+  const doneHours = progress.doneMinutes / 60;
+  const remainingHours = progress.remainingMinutes / 60;
+
+  // Best case: rate measured per seven days of actual studying.
+  const dailyRate = doneHours / Math.max(activeDays / 7, 1 / 7);
+
+  // Realistic: same work spread over the calendar time it really took.
+  const firstActive = activityDates.slice().sort()[0];
+  const elapsedDays =
+    differenceInCalendarDays(new Date(), parseISO(firstActive)) + 1;
+  const calendarWeeks = Math.max(1, elapsedDays / 7);
+  const habitRate = doneHours / calendarWeeks;
+
+  const atCurrentHabits = project(
+    remainingHours,
+    habitRate,
+    settings.exam_date
+  );
+
+  return {
+    daysLeft,
+    status: atCurrentHabits?.status ?? "no_data",
+    ifDaily: project(remainingHours, dailyRate, settings.exam_date),
+    atCurrentHabits,
+    studyDaysPerWeek: Number(
+      Math.min(7, activeDays / calendarWeeks).toFixed(1)
+    ),
+    remainingMinutes: progress.remainingMinutes,
+    remainingTopics,
+  };
 }
 
 export function weeklyProgress(
   topics: Topic[],
   sessions: McqSession[],
-  settings: UserSettings | null
+  settings: UserSettings | null,
+  study: StudySession[] = []
 ) {
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
   const topicsThisWeek = topics.filter((t) => {
@@ -300,9 +448,18 @@ export function weeklyProgress(
     return parseISO(t.status_updated_at) >= weekStart;
   }).length;
 
-  const mcqsThisWeek = sessions
-    .filter((s) => parseISO(s.session_date) >= weekStart)
-    .reduce((sum, s) => sum + s.total_questions, 0);
+  const weekSessions = sessions.filter(
+    (s) => parseISO(s.session_date) >= weekStart
+  );
+  const mcqsThisWeek = weekSessions.reduce(
+    (sum, s) => sum + s.total_questions,
+    0
+  );
+  const minutesThisWeek =
+    weekSessions.reduce((sum, s) => sum + (s.time_taken_minutes ?? 0), 0) +
+    study
+      .filter((s) => parseISO(s.session_date) >= weekStart)
+      .reduce((sum, s) => sum + s.minutes, 0);
 
   const targetTopics = settings?.weekly_target_topics ?? 3;
   const targetMcqs = settings?.weekly_target_mcqs ?? 100;
@@ -310,6 +467,7 @@ export function weeklyProgress(
   return {
     topicsThisWeek,
     mcqsThisWeek,
+    minutesThisWeek,
     targetTopics,
     targetMcqs,
     topicsPct: Math.min(100, Math.round((topicsThisWeek / targetTopics) * 100)),
@@ -317,23 +475,260 @@ export function weeklyProgress(
   };
 }
 
+export type WeekTotals = {
+  daysStudied: number;
+  minutes: number;
+  questions: number;
+  accuracy: number;
+  mocks: number;
+};
+
+export type WeeklyReview = {
+  weekStart: string;
+  weekEnd: string;
+  current: WeekTotals;
+  previous: WeekTotals;
+  /** Only the current week — status history isn't retained per change. */
+  topicsCompleted: number;
+  revisions: number;
+  hoursNeededPerWeek: number;
+  subjectMinutes: { name: string; slug: string; minutes: number }[];
+  neglected: { name: string; slug: string }[];
+};
+
+function weekTotals(
+  input: {
+    sessions: McqSession[];
+    study: StudySession[];
+    mocks: MockTest[];
+    activityDates: string[];
+  },
+  start: Date,
+  end: Date
+): WeekTotals {
+  const within = (iso: string) => {
+    const d = parseISO(iso);
+    return d >= start && d <= end;
+  };
+
+  const sessions = input.sessions.filter((s) => within(s.session_date));
+  const study = input.study.filter((s) => within(s.session_date));
+  const questions = sessions.reduce((n, s) => n + s.total_questions, 0);
+  const correct = sessions.reduce((n, s) => n + s.correct_answers, 0);
+
+  return {
+    daysStudied: new Set(input.activityDates.filter(within)).size,
+    minutes:
+      sessions.reduce((n, s) => n + (s.time_taken_minutes ?? 0), 0) +
+      study.reduce((n, s) => n + s.minutes, 0),
+    questions,
+    accuracy: questions === 0 ? 0 : Math.round((correct / questions) * 100),
+    mocks: input.mocks.filter((m) => within(m.test_date)).length,
+  };
+}
+
+/** This week against last week, plus what slipped. */
+export function weeklyReview(input: {
+  topics: TopicWithSubject[];
+  sessions: McqSession[];
+  study: StudySession[];
+  mocks: MockTest[];
+  subjects: Subject[];
+  activityDates: string[];
+  settings: UserSettings | null;
+}): WeeklyReview {
+  const { topics, sessions, study, mocks, subjects, activityDates, settings } =
+    input;
+
+  const start = startOfWeek(new Date(), { weekStartsOn: 1 });
+  const end = addDays(start, 6);
+  const prevStart = subDays(start, 7);
+  const prevEnd = subDays(start, 1);
+
+  const source = { sessions, study, mocks, activityDates };
+  const inWeek = (iso: string | null) => {
+    if (!iso) return false;
+    const d = parseISO(iso.slice(0, 10));
+    return d >= start && d <= end;
+  };
+
+  const subjectMinutes = timeBySubject(
+    sessions.filter((s) => inWeek(s.session_date)),
+    subjects,
+    topics,
+    study.filter((s) => inWeek(s.session_date))
+  );
+
+  return {
+    weekStart: format(start, "yyyy-MM-dd"),
+    weekEnd: format(end, "yyyy-MM-dd"),
+    current: weekTotals(source, start, end),
+    previous: weekTotals(source, prevStart, prevEnd),
+    topicsCompleted: topics.filter(
+      (t) => t.status === "done" && inWeek(t.status_updated_at)
+    ).length,
+    revisions: topics.filter((t) => inWeek(t.last_revised_at)).length,
+    hoursNeededPerWeek: suggestWeeklyTargets(topics, settings).hoursPerWeek,
+    subjectMinutes,
+    neglected: subjectMinutes
+      .filter((s) => s.minutes === 0)
+      .map(({ name, slug }) => ({ name, slug })),
+  };
+}
+
+const REVISE_BLOCK_MINUTES = 15;
+const STUDY_BLOCK_MINUTES = 45;
+
+export type DailyPlanItem = {
+  id: string;
+  kind: "revise" | "study" | "practice";
+  title: string;
+  detail: string;
+  href: string | null;
+  minutes: number;
+  done: boolean;
+};
+
+/**
+ * A short, fixed list that defines "done for today". Completion is derived from
+ * what you actually logged, so there's no separate checklist to keep in sync.
+ */
+export function dailyPlan(input: {
+  topics: TopicWithSubject[];
+  sessions: McqSession[];
+  study: StudySession[];
+  settings: UserSettings | null;
+}): { items: DailyPlanItem[]; doneCount: number; minutes: number } {
+  const { topics, sessions, study, settings } = input;
+  const today = format(new Date(), "yyyy-MM-dd");
+  const isToday = (iso: string | null) =>
+    Boolean(iso && iso.slice(0, 10) === today);
+
+  const items: DailyPlanItem[] = [];
+
+  // Revisions — show ones already cleared today so the list stays stable
+  const revisedToday = topics.filter((t) => isToday(t.last_revised_at));
+  const due = revisionQueue(topics).due;
+
+  for (const topic of revisedToday.slice(0, 2)) {
+    items.push({
+      id: `revise-${topic.id}`,
+      kind: "revise",
+      title: `Revise ${topic.name}`,
+      detail: topic.subjects?.name ?? "",
+      href: `/syllabus/${topic.id}`,
+      minutes: REVISE_BLOCK_MINUTES,
+      done: true,
+    });
+  }
+  for (const item of due.slice(0, Math.max(0, 2 - items.length))) {
+    items.push({
+      id: `revise-${item.topic.id}`,
+      kind: "revise",
+      title: `Revise ${item.topic.name}`,
+      detail:
+        item.daysOverdue > 0
+          ? `${item.daysOverdue} days late · ${item.topic.subjects?.name}`
+          : `Due today · ${item.topic.subjects?.name}`,
+      href: `/syllabus/${item.topic.id}`,
+      minutes: REVISE_BLOCK_MINUTES,
+      done: false,
+    });
+  }
+
+  // One topic to move forward
+  const studiedTodayIds = new Set([
+    ...study.filter((s) => s.session_date === today).map((s) => s.topic_id),
+    ...sessions.filter((s) => s.session_date === today).map((s) => s.topic_id),
+  ]);
+  const studiedToday = topics.find((t) => studiedTodayIds.has(t.id));
+
+  const nextTopic =
+    studiedToday ??
+    topics
+      .filter((t) => t.status === "in_progress")
+      .sort(
+        (a, b) =>
+          a.confidence - b.confidence ||
+          priorityRank[a.priority] - priorityRank[b.priority]
+      )[0] ??
+    topics
+      .filter((t) => t.status === "not_started")
+      .sort(
+        (a, b) =>
+          priorityRank[a.priority] - priorityRank[b.priority] ||
+          a.display_order - b.display_order
+      )[0];
+
+  if (nextTopic) {
+    items.push({
+      id: `study-${nextTopic.id}`,
+      kind: "study",
+      title: studiedToday
+        ? `Studied ${nextTopic.name}`
+        : `Study ${nextTopic.name}`,
+      detail: `${nextTopic.subjects?.name} · ~${hoursLabel(topicMinutes(nextTopic))} total`,
+      href: `/syllabus/${nextTopic.id}`,
+      minutes: Math.min(STUDY_BLOCK_MINUTES, topicMinutes(nextTopic)),
+      done: Boolean(studiedToday),
+    });
+  }
+
+  // Daily share of the weekly question target
+  const goal = Math.max(
+    10,
+    Math.ceil((settings?.weekly_target_mcqs ?? 100) / 7)
+  );
+  const answered = sessions
+    .filter((s) => s.session_date === today)
+    .reduce((sum, s) => sum + s.total_questions, 0);
+
+  items.push({
+    id: "practice",
+    kind: "practice",
+    title: `Practice ${goal} questions`,
+    detail:
+      answered >= goal
+        ? `${answered} logged today`
+        : `${answered}/${goal} logged today`,
+    href: "/syllabus",
+    minutes: goal,
+    done: answered >= goal,
+  });
+
+  return {
+    items,
+    doneCount: items.filter((i) => i.done).length,
+    minutes: items.reduce((sum, i) => sum + i.minutes, 0),
+  };
+}
+
 export function suggestWeeklyTargets(
   topicList: Topic[],
   settings: UserSettings | null
-): { topics: number; mcqs: number } {
-  const remaining = topicList.filter((t) => t.status !== "done").length;
-  if (!settings?.exam_date) {
-    return { topics: 3, mcqs: 100 };
+): { topics: number; mcqs: number; hoursPerWeek: number } {
+  const pending = topicList.filter((t) => t.status !== "done");
+  if (!settings?.exam_date || pending.length === 0) {
+    return { topics: 3, mcqs: 100, hoursPerWeek: 0 };
   }
+
   const daysLeft = Math.max(
     1,
     differenceInCalendarDays(parseISO(settings.exam_date), new Date())
   );
   const weeksLeft = Math.max(1, daysLeft / 7);
-  const topicTarget = Math.max(2, Math.ceil(remaining / weeksLeft));
+
+  // Derive the target from remaining study hours, then convert back to a topic
+  // count using the average length of what's actually left.
+  const remainingMinutes = totalMinutes(pending);
+  const minutesPerWeek = remainingMinutes / weeksLeft;
+  const avgTopicMinutes = remainingMinutes / pending.length;
+  const topicTarget = Math.max(2, Math.ceil(minutesPerWeek / avgTopicMinutes));
+
   return {
-    topics: Math.min(topicTarget, 12),
+    topics: Math.min(topicTarget, 20),
     mcqs: Math.min(topicTarget * 40, 250),
+    hoursPerWeek: Number((minutesPerWeek / 60).toFixed(1)),
   };
 }
 
@@ -473,7 +868,8 @@ export function accuracyTrend(
 export function timeBySubject(
   sessions: McqSession[],
   subjects: Subject[],
-  topics: Topic[]
+  topics: Topic[],
+  study: StudySession[] = []
 ): { name: string; minutes: number; slug: string }[] {
   const topicSubject = new Map(topics.map((t) => [t.id, t.subject_id]));
   const totals = new Map<string, number>();
@@ -485,6 +881,12 @@ export function timeBySubject(
       subjectId,
       (totals.get(subjectId) ?? 0) + (s.time_taken_minutes ?? 0)
     );
+  }
+
+  for (const s of study) {
+    const subjectId = topicSubject.get(s.topic_id);
+    if (!subjectId) continue;
+    totals.set(subjectId, (totals.get(subjectId) ?? 0) + s.minutes);
   }
 
   return subjects
@@ -510,4 +912,243 @@ export function mockScoreTrend(
         Number((m.correct - 0.5 * m.wrong).toFixed(1)),
       name: m.name,
     }));
+}
+
+export type SectionalStat = {
+  slug: string;
+  label: string;
+  questions: number;
+  mocks: number;
+  correct: number;
+  wrong: number;
+  attempted: number;
+  /** Correct out of attempted. */
+  accuracy: number;
+  /** Average net marks per mock (+1 correct, −0.5 wrong). */
+  avgNet: number;
+  avgAttempted: number;
+  /** Share of the section left unattempted, averaged across mocks. */
+  skipRate: number;
+  trend: { date: string; net: number; accuracy: number; name: string }[];
+};
+
+/** Per-section performance across every mock that has a sectional breakdown. */
+export function sectionalPerformance(mocks: MockTest[]): SectionalStat[] {
+  const scored = mocks
+    .filter((m) => m.sectional_breakdown)
+    .sort((a, b) => a.test_date.localeCompare(b.test_date));
+
+  return MOCK_SECTIONS.map((section) => {
+    let correct = 0;
+    let wrong = 0;
+    let count = 0;
+    const trend: SectionalStat["trend"] = [];
+
+    for (const mock of scored) {
+      const row = mock.sectional_breakdown?.[section.slug];
+      if (!row) continue;
+
+      correct += row.correct;
+      wrong += row.wrong;
+      count += 1;
+
+      const attempted = row.correct + row.wrong;
+      trend.push({
+        date: mock.test_date,
+        name: mock.name,
+        net: Number((row.correct - 0.5 * row.wrong).toFixed(1)),
+        accuracy:
+          attempted === 0 ? 0 : Math.round((row.correct / attempted) * 100),
+      });
+    }
+
+    const attempted = correct + wrong;
+    const net = correct - 0.5 * wrong;
+
+    return {
+      slug: section.slug,
+      label: section.label,
+      questions: section.questions,
+      mocks: count,
+      correct,
+      wrong,
+      attempted,
+      accuracy: attempted === 0 ? 0 : Math.round((correct / attempted) * 100),
+      avgNet: count === 0 ? 0 : Number((net / count).toFixed(1)),
+      avgAttempted: count === 0 ? 0 : Number((attempted / count).toFixed(1)),
+      skipRate:
+        count === 0
+          ? 0
+          : Math.round(
+              ((section.questions * count - attempted) /
+                (section.questions * count)) *
+                100
+            ),
+      trend,
+    };
+  });
+}
+
+/** SSC CGL Tier 1: 25 questions per section, +2 correct, −0.5 wrong. */
+const TIER1_MARKS_PER_CORRECT = 2;
+const TIER1_NEGATIVE_PER_WRONG = 0.5;
+export const TIER1_SECTION_MARKS = 50;
+export const TIER1_TOTAL_MARKS = 200;
+
+export type ScoreSection = {
+  slug: string;
+  label: string;
+  /** Correct out of attempted, as a percentage. */
+  accuracy: number;
+  /** Share of the 25 questions you'd realistically attempt. */
+  attemptRate: number;
+  expectedMarks: number;
+  /** Marks if you covered the whole section and held your current accuracy. */
+  potentialMarks: number;
+  gain: number;
+  remainingHours: number;
+  /** Marks you'd gain per remaining study hour, where accuracy is known. */
+  marksPerHour: number | null;
+  basis: "mocks" | "practice" | "none";
+};
+
+export type ScoreProjection = {
+  expected: number;
+  target: number;
+  gap: number;
+  sections: ScoreSection[];
+  bestLeverage: ScoreSection | null;
+  confidence: "low" | "medium" | "high";
+};
+
+/**
+ * Turns mock and practice data into an expected Tier 1 score. Mocks are used
+ * where available since they reflect exam conditions; otherwise practice
+ * accuracy is combined with how much of the section you've actually covered,
+ * because you can't attempt what you haven't studied.
+ */
+export function projectedScore(input: {
+  topics: Topic[];
+  sessions: McqSession[];
+  mocks: MockTest[];
+  subjects: Subject[];
+  settings: UserSettings | null;
+}): ScoreProjection {
+  const { topics, sessions, mocks, subjects, settings } = input;
+  const sectional = sectionalPerformance(mocks);
+  const subjectBySlug = new Map(subjects.map((s) => [s.slug, s]));
+  const topicSubject = new Map(topics.map((t) => [t.id, t.subject_id]));
+
+  const sections: ScoreSection[] = MOCK_SECTIONS.map((meta) => {
+    const subject = subjectBySlug.get(meta.slug);
+    const subjectTopics = subject
+      ? topics.filter((t) => t.subject_id === subject.id)
+      : [];
+    const progress = topicsProgress(subjectTopics);
+
+    // Half credit for in-progress work — you can attempt some of it already
+    const coveredMinutes = subjectTopics.reduce((sum, t) => {
+      if (t.status === "done") return sum + topicMinutes(t);
+      if (t.status === "in_progress") return sum + topicMinutes(t) * 0.5;
+      return sum;
+    }, 0);
+    const coverage =
+      progress.totalMinutes === 0 ? 0 : coveredMinutes / progress.totalMinutes;
+
+    const fromMocks = sectional.find((s) => s.slug === meta.slug);
+
+    let accuracy = 0;
+    let attemptRate = 0;
+    let basis: ScoreSection["basis"] = "none";
+
+    if (fromMocks && fromMocks.mocks > 0) {
+      accuracy = fromMocks.accuracy / 100;
+      attemptRate = Math.min(1, fromMocks.avgAttempted / meta.questions);
+      basis = "mocks";
+    } else if (subject) {
+      const practice = sessions.filter(
+        (s) => topicSubject.get(s.topic_id) === subject.id
+      );
+      const attempted = practice.reduce((n, s) => n + s.total_questions, 0);
+      if (attempted > 0) {
+        accuracy =
+          practice.reduce((n, s) => n + s.correct_answers, 0) / attempted;
+        attemptRate = coverage;
+        basis = "practice";
+      }
+    }
+
+    const marksFor = (attempted: number) => {
+      const correct = attempted * accuracy;
+      const wrong = attempted - correct;
+      return Math.max(
+        0,
+        correct * TIER1_MARKS_PER_CORRECT - wrong * TIER1_NEGATIVE_PER_WRONG
+      );
+    };
+
+    const expectedMarks = marksFor(meta.questions * attemptRate);
+    // Covering the rest of the section lets you attempt all of it, but your
+    // accuracy is the ceiling — so an untouched section isn't worth all 50.
+    const potentialMarks = basis === "none" ? 0 : marksFor(meta.questions);
+    const gain = Math.max(0, potentialMarks - expectedMarks);
+    const remainingHours = progress.remainingMinutes / 60;
+
+    return {
+      slug: meta.slug,
+      label: meta.label,
+      accuracy: Math.round(accuracy * 100),
+      attemptRate: Math.round(attemptRate * 100),
+      expectedMarks: Number(expectedMarks.toFixed(1)),
+      potentialMarks: Number(potentialMarks.toFixed(1)),
+      gain: Number(gain.toFixed(1)),
+      remainingHours: Number(remainingHours.toFixed(1)),
+      marksPerHour:
+        basis !== "none" && remainingHours > 0
+          ? Number((gain / remainingHours).toFixed(2))
+          : null,
+      basis,
+    };
+  });
+
+  const expected = Number(
+    sections.reduce((sum, s) => sum + s.expectedMarks, 0).toFixed(1)
+  );
+  const target = settings?.target_score ?? 150;
+
+  const withLeverage = sections.filter((s) => s.marksPerHour !== null);
+  const bestLeverage =
+    withLeverage.length > 0
+      ? withLeverage.reduce((best, s) =>
+          (s.marksPerHour ?? 0) > (best.marksPerHour ?? 0) ? s : best
+        )
+      : null;
+
+  const questionsAnswered = sessions.reduce(
+    (n, s) => n + s.total_questions,
+    0
+  );
+  const mocksWithSections = sectional.filter((s) => s.mocks > 0).length;
+  const confidence =
+    mocksWithSections >= 3
+      ? "high"
+      : mocksWithSections >= 1 || questionsAnswered >= 300
+        ? "medium"
+        : "low";
+
+  return {
+    expected,
+    target,
+    gap: Number((target - expected).toFixed(1)),
+    sections,
+    bestLeverage,
+    confidence,
+  };
+}
+
+/** Weakest section by net marks, ignoring sections with no data. */
+export function weakestSection(stats: SectionalStat[]): SectionalStat | null {
+  const withData = stats.filter((s) => s.mocks > 0);
+  if (withData.length === 0) return null;
+  return withData.reduce((worst, s) => (s.avgNet < worst.avgNet ? s : worst));
 }

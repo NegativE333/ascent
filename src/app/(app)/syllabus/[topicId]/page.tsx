@@ -4,9 +4,11 @@ import { ArrowLeft } from "lucide-react";
 import { AccuracyChart } from "@/components/topic/accuracy-chart";
 import { NotesEditor } from "@/components/topic/notes-editor";
 import { SessionTable } from "@/components/topic/session-table";
+import { StudyTimer } from "@/components/topic/study-timer";
 import { LogMcqDialog } from "@/components/syllabus/log-mcq-dialog";
 import { TopicControls } from "@/components/topic/topic-controls";
 import { getTopic, getTopicSessions } from "@/lib/data";
+import { hoursLabel, topicMinutes } from "@/lib/stats";
 import { SUBJECT_COLORS, STATUS_LABELS } from "@/lib/types";
 
 export default async function TopicDetailPage({
@@ -46,10 +48,14 @@ export default async function TopicDetailPage({
             </p>
             <h1 className="page-title">{topic.name}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {STATUS_LABELS[topic.status]} · confidence {topic.confidence}/5
+              {STATUS_LABELS[topic.status]} · confidence {topic.confidence}/5 ·
+              ~{hoursLabel(topicMinutes(topic))} to cover
             </p>
           </div>
-          <LogMcqDialog topicId={topic.id} topicName={topic.name} />
+          <div className="flex flex-wrap items-center gap-2">
+            <StudyTimer topicId={topic.id} topicName={topic.name} />
+            <LogMcqDialog topicId={topic.id} topicName={topic.name} />
+          </div>
         </div>
       </div>
 

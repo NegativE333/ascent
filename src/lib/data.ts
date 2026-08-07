@@ -6,12 +6,14 @@ import {
   mapMockTest,
   mapSession,
   mapSettings,
+  mapStudySession,
   mapSubject,
   mapTopic,
 } from "@/lib/mappers";
 import type {
   McqSession,
   MockTest,
+  StudySession,
   Subject,
   Topic,
   TopicWithSubject,
@@ -33,11 +35,21 @@ const ensureSeeded = cache(async () => {
   await ensureSyllabusSeeded();
 });
 
+// Subjects are global seed data, so a short process-level cache is safe and
+// saves a cross-region round trip on every render.
+const SUBJECTS_TTL_MS = 5 * 60 * 1000;
+let subjectsCache: { at: number; value: Subject[] } | null = null;
+
 export const getSubjects = cache(async (): Promise<Subject[]> => {
+  if (subjectsCache && Date.now() - subjectsCache.at < SUBJECTS_TTL_MS) {
+    return subjectsCache.value;
+  }
   const subjects = await prisma.subject.findMany({
     orderBy: { displayOrder: "asc" },
   });
-  return subjects.map(mapSubject);
+  const value = subjects.map(mapSubject);
+  subjectsCache = { at: Date.now(), value };
+  return value;
 });
 
 export const getTopics = cache(async (): Promise<TopicWithSubject[]> => {
@@ -103,7 +115,7 @@ export const getSettings = cache(async (): Promise<UserSettings> => {
 
 export const getActivityDates = cache(async (): Promise<string[]> => {
   const userId = await requireUserId();
-  const [days, sessions] = await Promise.all([
+  const [days, sessions, study] = await Promise.all([
     prisma.activityDay.findMany({
       where: { userId },
       orderBy: { date: "asc" },
@@ -113,11 +125,25 @@ export const getActivityDates = cache(async (): Promise<string[]> => {
       where: { userId },
       select: { sessionDate: true },
     }),
+    prisma.studySession.findMany({
+      where: { userId },
+      select: { sessionDate: true },
+    }),
   ]);
   const dates = new Set<string>();
   for (const d of days) dates.add(d.date.toISOString().slice(0, 10));
   for (const s of sessions) dates.add(s.sessionDate.toISOString().slice(0, 10));
+  for (const s of study) dates.add(s.sessionDate.toISOString().slice(0, 10));
   return Array.from(dates);
+});
+
+export const getStudySessions = cache(async (): Promise<StudySession[]> => {
+  const userId = await requireUserId();
+  const sessions = await prisma.studySession.findMany({
+    where: { userId },
+    orderBy: [{ sessionDate: "desc" }, { createdAt: "desc" }],
+  });
+  return sessions.map(mapStudySession);
 });
 
 export const getMockTests = cache(async (): Promise<MockTest[]> => {
@@ -139,7 +165,7 @@ export const getDashboardData = cache(async () => {
   await requireUserId();
   await ensureSeeded();
 
-  const [subjects, topics, sessions, settings, activityDates, mocks] =
+  const [subjects, topics, sessions, settings, activityDates, mocks, study] =
     await Promise.all([
       getSubjects(),
       getTopics(),
@@ -147,9 +173,25 @@ export const getDashboardData = cache(async () => {
       getSettings(),
       getActivityDates(),
       getMockTests(),
+      getStudySessions(),
     ]);
 
-  return { subjects, topics, sessions, settings, activityDates, mocks };
+  return {
+    subjects,
+    topics,
+    sessions,
+    settings,
+    activityDates,
+    mocks,
+    study,
+  };
 });
 
-export type { Topic, Subject, McqSession, UserSettings, MockTest };
+export type {
+  Topic,
+  Subject,
+  McqSession,
+  StudySession,
+  UserSettings,
+  MockTest,
+};

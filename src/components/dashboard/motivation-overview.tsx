@@ -4,13 +4,7 @@ import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
 
-type Pace = {
-  daysLeft: number | null;
-  projectedDate: string | null;
-  status: "no_exam" | "on_pace" | "behind" | "ahead" | "done" | "no_data";
-  daysDelta: number | null;
-  topicsPerWeek: number;
-};
+import { hoursLabel, type ExamPace } from "@/lib/stats";
 
 type Week = {
   topicsThisWeek: number;
@@ -86,6 +80,34 @@ function TargetBar({
   );
 }
 
+function ProjectionCell({
+  label,
+  date,
+  detail,
+  behind,
+}: {
+  label: string;
+  date: string;
+  detail: string;
+  behind: boolean;
+}) {
+  return (
+    <div className="min-w-0 px-3 py-2.5 sm:px-4">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p
+        className={`stat-number mt-0.5 text-sm font-medium ${
+          behind ? "text-tag-revise-fg" : "text-foreground"
+        }`}
+      >
+        Finish ~{format(parseISO(date), "MMM d, yyyy")}
+      </p>
+      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+        {detail}
+      </p>
+    </div>
+  );
+}
+
 export function MotivationOverview({
   streak,
   longest,
@@ -94,7 +116,7 @@ export function MotivationOverview({
 }: {
   streak: number;
   longest: number;
-  pace: Pace;
+  pace: ExamPace;
   week: Week;
 }) {
   const daysLeft =
@@ -113,20 +135,17 @@ export function MotivationOverview({
               ? "Behind"
               : "Building pace";
 
+  const habits = pace.atCurrentHabits;
   const paceHint =
-    pace.status === "no_exam" ? (
-      <Link href="/settings" className="underline hover:text-foreground">
-        Add in settings
-      </Link>
-    ) : pace.status === "ahead" || pace.status === "behind" ? (
-      `${Math.abs(pace.daysDelta ?? 0)} days ${pace.status}`
-    ) : pace.projectedDate ? (
-      `Finish ~${format(parseISO(pace.projectedDate), "MMM d")}`
-    ) : pace.status === "no_data" ? (
-      "Need more practice data"
-    ) : (
-      "Keep going"
-    );
+    pace.status === "no_exam"
+      ? "Not set"
+      : pace.status === "no_data"
+        ? "Need more practice data"
+        : habits
+          ? habits.status === "on_pace"
+            ? `Finish ~${format(parseISO(habits.projectedDate), "MMM d")}`
+            : `${Math.abs(habits.daysDelta)} days ${habits.status}`
+          : "Keep going";
 
   return (
     <section className="panel overflow-hidden">
@@ -152,12 +171,7 @@ export function MotivationOverview({
           value={daysLeft ?? "—"}
           hint={daysLeft == null ? "Not set" : undefined}
         />
-        <StatCell
-          label="Pace"
-          compact
-          value={paceTitle}
-          hint={typeof paceHint === "string" ? paceHint : "Not set"}
-        />
+        <StatCell label="Pace" compact value={paceTitle} hint={paceHint} />
       </div>
 
       {pace.status === "no_exam" && (
@@ -166,6 +180,32 @@ export function MotivationOverview({
           <Link href="/settings" className="text-foreground underline">
             Open settings
           </Link>
+        </div>
+      )}
+
+      {pace.remainingTopics > 0 && (
+        <div className="border-b border-border px-4 py-2 text-[11px] text-muted-foreground">
+          <span className="text-foreground">
+            {hoursLabel(pace.remainingMinutes)}
+          </span>{" "}
+          of study left across {pace.remainingTopics} topics
+        </div>
+      )}
+
+      {pace.atCurrentHabits && pace.ifDaily && (
+        <div className="grid grid-cols-2 divide-x divide-border border-b border-border">
+          <ProjectionCell
+            label="At current habits"
+            date={pace.atCurrentHabits.projectedDate}
+            detail={`${pace.atCurrentHabits.hoursPerWeek}h/week · ${pace.studyDaysPerWeek} study days/week`}
+            behind={pace.atCurrentHabits.status === "behind"}
+          />
+          <ProjectionCell
+            label="If you study daily"
+            date={pace.ifDaily.projectedDate}
+            detail={`${pace.ifDaily.hoursPerWeek}h/week`}
+            behind={pace.ifDaily.status === "behind"}
+          />
         </div>
       )}
 

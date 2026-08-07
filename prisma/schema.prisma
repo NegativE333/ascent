@@ -42,11 +42,15 @@ model Topic {
   priority        TopicPriority @default(medium)
   confidence      Int           @default(0)
   notes           String?
+  estimatedMinutes Int          @default(0) @map("estimated_minutes")
   lastPracticedAt DateTime?     @map("last_practiced_at")
+  lastRevisedAt   DateTime?     @map("last_revised_at")
+  reviewCount     Int           @default(0) @map("review_count")
   statusUpdatedAt DateTime?     @map("status_updated_at")
   createdAt       DateTime      @default(now()) @map("created_at")
   subject         Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   sessions        McqSession[]
+  studySessions   StudySession[]
 
   @@unique([userId, subjectId, name])
   @@index([userId])
@@ -72,17 +76,53 @@ model McqSession {
   @@map("mcq_sessions")
 }
 
+/** Time spent studying a topic without necessarily answering questions. */
+model StudySession {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  topicId     String   @map("topic_id") @db.Uuid
+  sessionDate DateTime @map("session_date") @db.Date
+  minutes     Int
+  source      String   @default("timer")
+  createdAt   DateTime @default(now()) @map("created_at")
+  topic       Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([topicId])
+  @@index([sessionDate])
+  @@map("study_sessions")
+}
+
 model UserSettings {
   id                 String    @id @default(uuid()) @db.Uuid
   userId             String    @unique @map("user_id") @db.Uuid
   examDate           DateTime? @map("exam_date") @db.Date
   weeklyTargetTopics Int       @default(3) @map("weekly_target_topics")
   weeklyTargetMcqs   Int       @default(100) @map("weekly_target_mcqs")
+  /** Tier 1 marks you're aiming for, used for the score projection. */
+  targetScore        Int       @default(150) @map("target_score")
+  /** Local time for the daily nudge, as "HH:mm". */
+  reminderTime       String?   @map("reminder_time")
+  /** Minutes offset from UTC, so the cron can resolve the user's local time. */
+  reminderOffset     Int       @default(330) @map("reminder_offset")
   seenMilestones     String[]  @default([]) @map("seen_milestones")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
   @@map("user_settings")
+}
+
+/** Web push endpoint for the daily reminder. */
+model PushSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 model MockTest {

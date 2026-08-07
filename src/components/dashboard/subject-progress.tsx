@@ -3,19 +3,19 @@
 import Link from "next/link";
 import { SUBJECT_COLORS, type Subject } from "@/lib/types";
 import { GA_SECTION_ORDER } from "@/lib/syllabus-seed";
-import { sectionProgress, type SectionProgress } from "@/lib/stats";
+import {
+  hoursLabel,
+  sectionProgress,
+  type SectionProgress,
+  type WeightedProgress,
+} from "@/lib/stats";
 import type { Topic } from "@/lib/types";
 
 export function SubjectProgress({
   items,
   topics,
 }: {
-  items: {
-    subject: Subject;
-    percent: number;
-    done: number;
-    total: number;
-  }[];
+  items: ({ subject: Subject } & WeightedProgress)[];
   topics: Topic[];
 }) {
   return (
@@ -40,7 +40,8 @@ export function SubjectProgress({
                 {item.subject.name}
               </Link>
               <p className="stat-number text-xs text-muted-foreground">
-                {item.done}/{item.total} · {item.percent}%
+                {item.done}/{item.total} · {item.percent}% ·{" "}
+                {hoursLabel(item.remainingMinutes)} left
               </p>
             </div>
             <div className="h-1.5 overflow-hidden rounded-[2px] bg-track">

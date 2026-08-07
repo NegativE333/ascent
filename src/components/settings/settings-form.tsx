@@ -13,11 +13,12 @@ export function SettingsForm({
   suggested,
 }: {
   settings: UserSettings;
-  suggested: { topics: number; mcqs: number };
+  suggested: { topics: number; mcqs: number; hoursPerWeek: number };
 }) {
   const [examDate, setExamDate] = useState(settings.exam_date ?? "");
   const [topics, setTopics] = useState(String(settings.weekly_target_topics));
   const [mcqs, setMcqs] = useState(String(settings.weekly_target_mcqs));
+  const [targetScore, setTargetScore] = useState(String(settings.target_score));
   const [pending, startTransition] = useTransition();
 
   function save(e: React.FormEvent) {
@@ -28,6 +29,7 @@ export function SettingsForm({
           examDate: examDate || null,
           weeklyTargetTopics: Number(topics) || 3,
           weeklyTargetMcqs: Number(mcqs) || 100,
+          targetScore: Number(targetScore) || 150,
         });
         toast.success("Settings saved");
       } catch (err) {
@@ -80,9 +82,31 @@ export function SettingsForm({
         </div>
       </div>
 
+      <div className="space-y-1.5">
+        <Label htmlFor="targetScore" className="text-xs">
+          Target Tier 1 score
+        </Label>
+        <Input
+          id="targetScore"
+          type="number"
+          min={1}
+          max={200}
+          value={targetScore}
+          onChange={(e) => setTargetScore(e.target.value)}
+          className="h-9 shadow-none"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Out of 200. Recent cutoffs for the higher posts have sat around
+          150–160.
+        </p>
+      </div>
+
       <p className="text-xs text-muted-foreground">
-        Suggested from your pace: {suggested.topics} topics / {suggested.mcqs}{" "}
-        MCQs per week.{" "}
+        To finish before your exam you need roughly{" "}
+        {suggested.hoursPerWeek > 0
+          ? `${suggested.hoursPerWeek}h of study a week — about `
+          : ""}
+        {suggested.topics} topics / {suggested.mcqs} MCQs per week.{" "}
         <button
           type="button"
           className="underline hover:text-foreground"

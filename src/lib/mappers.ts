@@ -1,13 +1,16 @@
 import type {
   McqSession as PrismaMcqSession,
   MockTest as PrismaMockTest,
+  StudySession as PrismaStudySession,
   Subject as PrismaSubject,
   Topic as PrismaTopic,
   UserSettings as PrismaUserSettings,
 } from "@prisma/client";
 import type {
   McqSession,
+  MockSectionScore,
   MockTest,
+  StudySession,
   Subject,
   Topic,
   TopicPriority,
@@ -48,7 +51,10 @@ export function mapTopic(
     priority: t.priority as TopicPriority,
     confidence: t.confidence,
     notes: t.notes,
+    estimated_minutes: t.estimatedMinutes ?? 0,
     last_practiced_at: iso(t.lastPracticedAt),
+    last_revised_at: iso(t.lastRevisedAt),
+    review_count: t.reviewCount ?? 0,
     status_updated_at: iso(t.statusUpdatedAt),
     created_at: t.createdAt.toISOString(),
   };
@@ -80,6 +86,25 @@ export function mapSession(
   };
 }
 
+export function mapStudySession(
+  s: PrismaStudySession & {
+    topic?: PrismaTopic & { subject?: PrismaSubject };
+  }
+): StudySession {
+  return {
+    id: s.id,
+    user_id: s.userId,
+    topic_id: s.topicId,
+    session_date: dateOnly(s.sessionDate),
+    minutes: s.minutes,
+    source: s.source,
+    created_at: s.createdAt.toISOString(),
+    topics: s.topic
+      ? (mapTopic(s.topic) as Topic & { subjects?: Subject })
+      : undefined,
+  };
+}
+
 export function mapSettings(s: PrismaUserSettings): UserSettings {
   return {
     id: s.id,
@@ -87,6 +112,9 @@ export function mapSettings(s: PrismaUserSettings): UserSettings {
     exam_date: s.examDate ? dateOnly(s.examDate) : null,
     weekly_target_topics: s.weeklyTargetTopics,
     weekly_target_mcqs: s.weeklyTargetMcqs,
+    target_score: s.targetScore,
+    reminder_time: s.reminderTime,
+    reminder_offset: s.reminderOffset,
     seen_milestones: s.seenMilestones,
   };
 }
@@ -103,7 +131,7 @@ export function mapMockTest(m: PrismaMockTest): MockTest {
     score: m.score,
     percentile: m.percentile,
     sectional_breakdown:
-      (m.sectionalBreakdown as Record<string, number> | null) ?? null,
+      (m.sectionalBreakdown as Record<string, MockSectionScore> | null) ?? null,
     notes: m.notes,
     created_at: m.createdAt.toISOString(),
   };

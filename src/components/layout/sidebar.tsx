@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import {
   BarChart3,
   BookOpen,
+  CalendarCheck,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -146,6 +147,15 @@ function SidebarNav({
         >
           <BarChart3 className="size-4 shrink-0 opacity-70" />
           Analytics
+        </Link>
+
+        <Link
+          href="/review"
+          onClick={onNavigate}
+          className={itemClass(pathname.startsWith("/review"))}
+        >
+          <CalendarCheck className="size-4 shrink-0 opacity-70" />
+          Weekly review
         </Link>
 
         <Link

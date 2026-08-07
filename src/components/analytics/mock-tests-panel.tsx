@@ -15,10 +15,16 @@ import { toast } from "sonner";
 import { createMockTest, deleteMockTest } from "@/lib/actions";
 import { useChartTheme } from "@/hooks/use-chart-theme";
 import { mockScoreTrend } from "@/lib/stats";
-import type { MockTest } from "@/lib/types";
+import { MOCK_SECTIONS, type MockTest } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+type SectionInput = { correct: string; wrong: string };
+
+const emptySections: Record<string, SectionInput> = Object.fromEntries(
+  MOCK_SECTIONS.map((s) => [s.slug, { correct: "", wrong: "" }])
+);
 
 export function MockTestsPanel({ mocks }: { mocks: MockTest[] }) {
   const theme = useChartTheme();
@@ -28,17 +34,51 @@ export function MockTestsPanel({ mocks }: { mocks: MockTest[] }) {
   const [correct, setCorrect] = useState("70");
   const [wrong, setWrong] = useState("30");
   const [percentile, setPercentile] = useState("");
+  const [sections, setSections] = useState(emptySections);
+  const [showSections, setShowSections] = useState(false);
   const trend = mockScoreTrend(mocks);
+
+  const sectionTotals = MOCK_SECTIONS.reduce(
+    (acc, s) => {
+      acc.correct += Number(sections[s.slug]?.correct || 0);
+      acc.wrong += Number(sections[s.slug]?.wrong || 0);
+      return acc;
+    },
+    { correct: 0, wrong: 0 }
+  );
+  const hasSectionData = sectionTotals.correct + sectionTotals.wrong > 0;
+
+  function setSection(slug: string, field: keyof SectionInput, value: string) {
+    setSections((prev) => ({
+      ...prev,
+      [slug]: { ...prev[slug], [field]: value },
+    }));
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const totalQuestions = Number(total);
-    const c = Number(correct);
-    const w = Number(wrong);
+    // Section entries are the source of truth when provided
+    const c = hasSectionData ? sectionTotals.correct : Number(correct);
+    const w = hasSectionData ? sectionTotals.wrong : Number(wrong);
+
     if (!name || !totalQuestions || c + w > totalQuestions) {
       toast.error("Check mock test fields");
       return;
     }
+
+    const breakdown = hasSectionData
+      ? Object.fromEntries(
+          MOCK_SECTIONS.map((s) => [
+            s.slug,
+            {
+              correct: Number(sections[s.slug]?.correct || 0),
+              wrong: Number(sections[s.slug]?.wrong || 0),
+            },
+          ])
+        )
+      : null;
+
     startTransition(async () => {
       try {
         await createMockTest({
@@ -47,8 +87,10 @@ export function MockTestsPanel({ mocks }: { mocks: MockTest[] }) {
           correct: c,
           wrong: w,
           percentile: percentile ? Number(percentile) : null,
+          sectionalBreakdown: breakdown,
         });
         setName("");
+        setSections(emptySections);
         toast.success("Mock test logged");
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed");
@@ -179,8 +221,9 @@ export function MockTestsPanel({ mocks }: { mocks: MockTest[] }) {
           <Label className="text-xs">Correct</Label>
           <Input
             type="number"
-            value={correct}
+            value={hasSectionData ? String(sectionTotals.correct) : correct}
             onChange={(e) => setCorrect(e.target.value)}
+            disabled={hasSectionData}
             className="h-8 shadow-none"
           />
         </div>
@@ -188,8 +231,9 @@ export function MockTestsPanel({ mocks }: { mocks: MockTest[] }) {
           <Label className="text-xs">Wrong</Label>
           <Input
             type="number"
-            value={wrong}
+            value={hasSectionData ? String(sectionTotals.wrong) : wrong}
             onChange={(e) => setWrong(e.target.value)}
+            disabled={hasSectionData}
             className="h-8 shadow-none"
           />
         </div>
@@ -202,6 +246,62 @@ export function MockTestsPanel({ mocks }: { mocks: MockTest[] }) {
             className="h-8 shadow-none"
           />
         </div>
+
+        <div className="space-y-2 sm:col-span-2">
+          <button
+            type="button"
+            onClick={() => setShowSections((v) => !v)}
+            className="text-xs text-muted-foreground underline hover:text-foreground"
+          >
+            {showSections
+              ? "Hide sectional breakdown"
+              : "Add sectional breakdown (unlocks section analysis)"}
+          </button>
+
+          {showSections && (
+            <div className="space-y-2 rounded-md border border-border p-3">
+              {MOCK_SECTIONS.map((section) => (
+                <div
+                  key={section.slug}
+                  className="grid grid-cols-[minmax(0,1fr)_72px_72px] items-center gap-2"
+                >
+                  <Label className="text-xs font-normal text-muted-foreground">
+                    {section.label}
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={section.questions}
+                    placeholder="right"
+                    value={sections[section.slug]?.correct ?? ""}
+                    onChange={(e) =>
+                      setSection(section.slug, "correct", e.target.value)
+                    }
+                    className="h-7 text-xs shadow-none"
+                  />
+                  <Input
+                    type="number"
+                    min={0}
+                    max={section.questions}
+                    placeholder="wrong"
+                    value={sections[section.slug]?.wrong ?? ""}
+                    onChange={(e) =>
+                      setSection(section.slug, "wrong", e.target.value)
+                    }
+                    className="h-7 text-xs shadow-none"
+                  />
+                </div>
+              ))}
+              {hasSectionData && (
+                <p className="text-[11px] text-muted-foreground">
+                  Totals come from these sections: {sectionTotals.correct} right,{" "}
+                  {sectionTotals.wrong} wrong.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="sm:col-span-2">
           <Button type="submit" size="sm" disabled={pending}>
             {pending ? "Saving…" : "Log mock test"}

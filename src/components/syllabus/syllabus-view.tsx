@@ -13,7 +13,12 @@ import {
 } from "@/components/ui/select";
 import { TopicRow } from "@/components/syllabus/topic-row";
 import { GA_SECTION_ORDER } from "@/lib/syllabus-seed";
-import { needsRevision, sectionProgress } from "@/lib/stats";
+import {
+  hoursLabel,
+  needsRevision,
+  sectionProgress,
+  topicsProgress,
+} from "@/lib/stats";
 import type {
   Subject,
   TopicPriority,
@@ -22,6 +27,17 @@ import type {
 } from "@/lib/types";
 
 const priorityRank = { high: 0, medium: 1, low: 2 };
+
+function SubjectSummary({ rows }: { rows: TopicWithSubject[] }) {
+  const progress = topicsProgress(rows);
+
+  return (
+    <span className="stat-number text-xs text-muted-foreground">
+      {progress.done}/{progress.total} done · {progress.percent}% ·{" "}
+      {hoursLabel(progress.remainingMinutes)} left
+    </span>
+  );
+}
 
 function sectionSortKey(section: string | null, subjectSlug: string) {
   if (!section) return 999;
@@ -233,18 +249,7 @@ export function SyllabusView({
                   <h2 className="text-sm font-semibold text-foreground">
                     {subject.name}
                   </h2>
-                  <span className="text-xs text-muted-foreground">
-                    {rows.filter((t) => t.status === "done").length}/
-                    {rows.length} done ·{" "}
-                    {rows.length === 0
-                      ? 0
-                      : Math.round(
-                          (rows.filter((t) => t.status === "done").length /
-                            rows.length) *
-                            100
-                        )}
-                    %
-                  </span>
+                  <SubjectSummary rows={rows} />
                 </div>
 
                 {hasSections ? (
@@ -260,7 +265,8 @@ export function SyllabusView({
                               {sec.section}
                             </h3>
                             <span className="stat-number text-[11px] text-muted-foreground">
-                              {sec.done}/{sec.total} · {sec.percent}%
+                              {sec.done}/{sec.total} · {sec.percent}% ·{" "}
+                              {hoursLabel(sec.remainingMinutes)} left
                             </span>
                           </div>
                           <div className="mb-2 h-1 overflow-hidden rounded-[2px] bg-track">

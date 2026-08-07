@@ -4,8 +4,16 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
-import { SUBJECT_SEED, TOPIC_SEED } from "@/lib/syllabus-seed";
-import type { TopicPriority, TopicStatus } from "@/lib/types";
+import {
+  SUBJECT_SEED,
+  TOPIC_SEED,
+  seedEstimateMinutes,
+} from "@/lib/syllabus-seed";
+import type {
+  MockSectionScore,
+  TopicPriority,
+  TopicStatus,
+} from "@/lib/types";
 
 async function requireUser() {
   const supabase = await createClient();
@@ -16,17 +24,24 @@ async function requireUser() {
   return user;
 }
 
-async function markActivity(userId: string, date = new Date()) {
+function activityUpsert(userId: string, date = new Date()) {
   const day = new Date(date.toISOString().slice(0, 10));
-  await prisma.activityDay.upsert({
+  return prisma.activityDay.upsert({
     where: { userId_date: { userId, date: day } },
     update: {},
     create: { userId, date: day },
   });
 }
 
+/**
+ * Seed verification costs ~4 round trips. The syllabus only changes when the
+ * seed file does, so remember verified users for the life of the process.
+ */
+const verifiedSyllabusUsers = new Set<string>();
+
 export async function ensureSyllabusSeeded() {
   const user = await requireUser();
+  if (verifiedSyllabusUsers.has(user.id)) return;
 
   await prisma.userSettings.upsert({
     where: { userId: user.id },
@@ -39,24 +54,30 @@ export async function ensureSyllabusSeeded() {
     0
   );
 
-  const [subjectCount, topicCount, gaUnsectioned] = await Promise.all([
-    prisma.subject.count(),
-    prisma.topic.count({ where: { userId: user.id } }),
-    prisma.topic.count({
-      where: {
-        userId: user.id,
-        subject: { slug: "general-awareness" },
-        OR: [{ section: null }, { section: "" }],
-      },
-    }),
-  ]);
+  const [subjectCount, topicCount, gaUnsectioned, missingEstimates] =
+    await Promise.all([
+      prisma.subject.count(),
+      prisma.topic.count({ where: { userId: user.id } }),
+      prisma.topic.count({
+        where: {
+          userId: user.id,
+          subject: { slug: "general-awareness" },
+          OR: [{ section: null }, { section: "" }],
+        },
+      }),
+      prisma.topic.count({
+        where: { userId: user.id, estimatedMinutes: 0 },
+      }),
+    ]);
 
   // Fast path once the detailed GK syllabus is synced
   if (
     subjectCount >= SUBJECT_SEED.length &&
     topicCount >= expectedTotal &&
-    gaUnsectioned === 0
+    gaUnsectioned === 0 &&
+    missingEstimates === 0
   ) {
+    verifiedSyllabusUsers.add(user.id);
     return;
   }
 
@@ -86,6 +107,7 @@ export async function ensureSyllabusSeeded() {
         name: true,
         section: true,
         displayOrder: true,
+        estimatedMinutes: true,
         _count: { select: { sessions: true } },
       },
     });
@@ -97,6 +119,8 @@ export async function ensureSyllabusSeeded() {
       const t = seedTopics[i];
       const order = i + 1;
       const hit = byName.get(t.name);
+      const estimatedMinutes = seedEstimateMinutes(slug, t);
+
       if (!hit) {
         toCreate.push({
           userId: user.id,
@@ -104,18 +128,22 @@ export async function ensureSyllabusSeeded() {
           name: t.name,
           section: t.section ?? null,
           displayOrder: order,
+          estimatedMinutes,
           status: t.status ?? ("not_started" as const),
           confidence: t.confidence ?? 0,
         });
       } else if (
         hit.section !== (t.section ?? null) ||
-        hit.displayOrder !== order
+        hit.displayOrder !== order ||
+        hit.estimatedMinutes === 0
       ) {
         await prisma.topic.update({
           where: { id: hit.id },
           data: {
             section: t.section ?? null,
             displayOrder: order,
+            // Only backfill; never clobber an estimate the user has tuned
+            ...(hit.estimatedMinutes === 0 ? { estimatedMinutes } : {}),
           },
         });
       }
@@ -132,25 +160,30 @@ export async function ensureSyllabusSeeded() {
       await prisma.topic.delete({ where: { id: old.id } });
     }
   }
+
+  verifiedSyllabusUsers.add(user.id);
 }
 
 export async function updateTopicStatus(topicId: string, status: TopicStatus) {
   const user = await requireUser();
-  await prisma.topic.updateMany({
+  const update = prisma.topic.updateMany({
     where: { id: topicId, userId: user.id },
     data: {
       status,
       statusUpdatedAt: new Date(),
     },
   });
+
+  // One round trip instead of two
   if (status === "in_progress" || status === "done") {
-    await markActivity(user.id);
+    await prisma.$transaction([update, activityUpsert(user.id)]);
+  } else {
+    await update;
   }
+
   revalidatePath("/");
   revalidatePath("/syllabus");
   revalidatePath(`/syllabus/${topicId}`);
-  revalidatePath("/analytics");
-  revalidatePath("/notes");
 }
 
 export async function updateTopicConfidence(topicId: string, confidence: number) {
@@ -159,7 +192,6 @@ export async function updateTopicConfidence(topicId: string, confidence: number)
     where: { id: topicId, userId: user.id },
     data: { confidence },
   });
-  revalidatePath("/");
   revalidatePath("/syllabus");
   revalidatePath(`/syllabus/${topicId}`);
 }
@@ -173,6 +205,36 @@ export async function updateTopicPriority(
     where: { id: topicId, userId: user.id },
     data: { priority },
   });
+  revalidatePath("/syllabus");
+  revalidatePath(`/syllabus/${topicId}`);
+}
+
+/**
+ * Log a revision. "good" advances the spaced-repetition stage so the topic
+ * returns later; "hard" drops it back to the start of the ladder.
+ */
+export async function markTopicRevised(
+  topicId: string,
+  recall: "good" | "hard" = "good"
+) {
+  const user = await requireUser();
+  const topic = await prisma.topic.findFirst({
+    where: { id: topicId, userId: user.id },
+    select: { reviewCount: true },
+  });
+  if (!topic) throw new Error("Topic not found");
+
+  await prisma.$transaction([
+    prisma.topic.updateMany({
+      where: { id: topicId, userId: user.id },
+      data: {
+        lastRevisedAt: new Date(),
+        reviewCount: recall === "good" ? topic.reviewCount + 1 : 0,
+      },
+    }),
+    activityUpsert(user.id),
+  ]);
+
   revalidatePath("/");
   revalidatePath("/syllabus");
   revalidatePath(`/syllabus/${topicId}`);
@@ -207,30 +269,30 @@ export async function createMcqSession(input: {
     ? new Date(input.sessionDate)
     : new Date();
 
-  await prisma.mcqSession.create({
-    data: {
-      userId: user.id,
-      topicId: input.topicId,
-      totalQuestions: input.totalQuestions,
-      correctAnswers: input.correctAnswers,
-      timeTakenMinutes: input.timeTakenMinutes ?? null,
-      sessionDate,
-      notes: input.notes || null,
-    },
-  });
-
-  await prisma.topic.update({
-    where: { id: input.topicId },
-    data: {
-      lastPracticedAt: new Date(),
-      statusUpdatedAt: new Date(),
-      ...(topic.status === "not_started"
-        ? { status: "in_progress" as const }
-        : {}),
-    },
-  });
-
-  await markActivity(user.id, sessionDate);
+  await prisma.$transaction([
+    prisma.mcqSession.create({
+      data: {
+        userId: user.id,
+        topicId: input.topicId,
+        totalQuestions: input.totalQuestions,
+        correctAnswers: input.correctAnswers,
+        timeTakenMinutes: input.timeTakenMinutes ?? null,
+        sessionDate,
+        notes: input.notes || null,
+      },
+    }),
+    prisma.topic.update({
+      where: { id: input.topicId },
+      data: {
+        lastPracticedAt: new Date(),
+        statusUpdatedAt: new Date(),
+        ...(topic.status === "not_started"
+          ? { status: "in_progress" as const }
+          : {}),
+      },
+    }),
+    activityUpsert(user.id, sessionDate),
+  ]);
 
   revalidatePath("/");
   revalidatePath("/syllabus");
@@ -238,37 +300,97 @@ export async function createMcqSession(input: {
   revalidatePath("/analytics");
 }
 
+/** Records focused study time, with or without questions attempted. */
+export async function logStudySession(input: {
+  topicId: string;
+  minutes: number;
+  source?: string;
+}) {
+  const user = await requireUser();
+  const minutes = Math.round(input.minutes);
+  if (minutes < 1) return { ok: false as const, error: "Nothing to log" };
+
+  const topic = await prisma.topic.findFirst({
+    where: { id: input.topicId, userId: user.id },
+    select: { status: true },
+  });
+  if (!topic) throw new Error("Topic not found");
+
+  const now = new Date();
+  const sessionDate = new Date(now.toISOString().slice(0, 10));
+
+  await prisma.$transaction([
+    prisma.studySession.create({
+      data: {
+        userId: user.id,
+        topicId: input.topicId,
+        sessionDate,
+        minutes,
+        source: input.source ?? "timer",
+      },
+    }),
+    prisma.topic.update({
+      where: { id: input.topicId },
+      data: {
+        lastPracticedAt: now,
+        statusUpdatedAt: now,
+        ...(topic.status === "not_started"
+          ? { status: "in_progress" as const }
+          : {}),
+      },
+    }),
+    activityUpsert(user.id, now),
+  ]);
+
+  revalidatePath("/");
+  revalidatePath("/syllabus");
+  revalidatePath(`/syllabus/${input.topicId}`);
+  revalidatePath("/analytics");
+  revalidatePath("/review");
+
+  return { ok: true as const, minutes };
+}
+
 export async function updateUserSettings(input: {
   examDate?: string | null;
   weeklyTargetTopics?: number;
   weeklyTargetMcqs?: number;
+  targetScore?: number;
+  reminderTime?: string | null;
+  reminderOffset?: number;
 }) {
   const user = await requireUser();
+  const shared = {
+    ...(input.examDate !== undefined
+      ? { examDate: input.examDate ? new Date(input.examDate) : null }
+      : {}),
+    ...(input.weeklyTargetTopics !== undefined
+      ? { weeklyTargetTopics: input.weeklyTargetTopics }
+      : {}),
+    ...(input.weeklyTargetMcqs !== undefined
+      ? { weeklyTargetMcqs: input.weeklyTargetMcqs }
+      : {}),
+    ...(input.targetScore !== undefined
+      ? { targetScore: input.targetScore }
+      : {}),
+    ...(input.reminderTime !== undefined
+      ? { reminderTime: input.reminderTime }
+      : {}),
+    ...(input.reminderOffset !== undefined
+      ? { reminderOffset: input.reminderOffset }
+      : {}),
+  };
+
   await prisma.userSettings.upsert({
     where: { userId: user.id },
-    update: {
-      ...(input.examDate !== undefined
-        ? {
-            examDate: input.examDate ? new Date(input.examDate) : null,
-          }
-        : {}),
-      ...(input.weeklyTargetTopics !== undefined
-        ? { weeklyTargetTopics: input.weeklyTargetTopics }
-        : {}),
-      ...(input.weeklyTargetMcqs !== undefined
-        ? { weeklyTargetMcqs: input.weeklyTargetMcqs }
-        : {}),
-    },
-    create: {
-      userId: user.id,
-      examDate: input.examDate ? new Date(input.examDate) : null,
-      weeklyTargetTopics: input.weeklyTargetTopics ?? 3,
-      weeklyTargetMcqs: input.weeklyTargetMcqs ?? 100,
-    },
+    update: shared,
+    create: { userId: user.id, ...shared },
   });
+
   revalidatePath("/");
   revalidatePath("/settings");
   revalidatePath("/analytics");
+  revalidatePath("/review");
 }
 
 export async function markMilestonesSeen(ids: string[]) {
@@ -295,7 +417,7 @@ export async function createMockTest(input: {
   score?: number | null;
   percentile?: number | null;
   notes?: string;
-  sectionalBreakdown?: Record<string, number> | null;
+  sectionalBreakdown?: Record<string, MockSectionScore> | null;
 }) {
   const user = await requireUser();
   const testDate = input.testDate ? new Date(input.testDate) : new Date();
@@ -303,22 +425,24 @@ export async function createMockTest(input: {
     input.score ??
     Number((input.correct - 0.5 * input.wrong).toFixed(1));
 
-  await prisma.mockTest.create({
-    data: {
-      userId: user.id,
-      name: input.name,
-      testDate,
-      totalQuestions: input.totalQuestions,
-      correct: input.correct,
-      wrong: input.wrong,
-      score,
-      percentile: input.percentile ?? null,
-      notes: input.notes || null,
-      sectionalBreakdown: input.sectionalBreakdown ?? undefined,
-    },
-  });
+  await prisma.$transaction([
+    prisma.mockTest.create({
+      data: {
+        userId: user.id,
+        name: input.name,
+        testDate,
+        totalQuestions: input.totalQuestions,
+        correct: input.correct,
+        wrong: input.wrong,
+        score,
+        percentile: input.percentile ?? null,
+        notes: input.notes || null,
+        sectionalBreakdown: input.sectionalBreakdown ?? undefined,
+      },
+    }),
+    activityUpsert(user.id, testDate),
+  ]);
 
-  await markActivity(user.id, testDate);
   revalidatePath("/analytics");
   revalidatePath("/");
 }

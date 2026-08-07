@@ -1,3 +1,4 @@
+import { ReminderSettings } from "@/components/settings/reminder-settings";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { getSettings, getTopics } from "@/lib/data";
 import { suggestWeeklyTargets } from "@/lib/stats";
@@ -14,7 +15,14 @@ export default async function SettingsPage() {
           Exam date and weekly targets. Change anytime — no setup wizard.
         </p>
       </div>
+
       <SettingsForm settings={settings} suggested={suggested} />
+
+      <div className="max-w-md">
+        <ReminderSettings
+          vapidPublicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ""}
+        />
+      </div>
     </div>
   );
 }

@@ -1,31 +1,34 @@
 import Link from "next/link";
 import { ActivityHeatmap } from "@/components/dashboard/activity-heatmap";
+import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { MilestoneToasts } from "@/components/dashboard/milestone-toasts";
 import { MotivationOverview } from "@/components/dashboard/motivation-overview";
 import { RecentSessions } from "@/components/dashboard/recent-sessions";
+import { RevisionQueue } from "@/components/dashboard/revision-queue";
 import { SubjectProgress } from "@/components/dashboard/subject-progress";
-import { TodaysFocus } from "@/components/dashboard/todays-focus";
 import { WeakTopics } from "@/components/dashboard/weak-topics";
 import { getDashboardData } from "@/lib/data";
 import {
+  dailyPlan,
   detectMilestones,
   examPace,
+  revisionQueue,
   subjectProgress,
   streakFromDays,
-  todaysFocus,
   weakTopics,
   weeklyProgress,
 } from "@/lib/stats";
 
 export default async function DashboardPage() {
-  const { subjects, topics, sessions, settings, activityDates } =
+  const { subjects, topics, sessions, settings, activityDates, study } =
     await getDashboardData();
 
   const { current: streak, longest } = streakFromDays(activityDates);
-  const focus = todaysFocus(topics);
   const pace = examPace(topics, settings, activityDates);
-  const week = weeklyProgress(topics, sessions, settings);
+  const week = weeklyProgress(topics, sessions, settings, study);
+  const plan = dailyPlan({ topics, sessions, study, settings });
   const progress = subjectProgress(topics, subjects);
+  const reviews = revisionQueue(topics);
   const weak = weakTopics(topics);
   const recent = sessions.slice(0, 8);
   const milestones = detectMilestones({
@@ -57,6 +60,12 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
+      <DailyPlan
+        items={plan.items}
+        doneCount={plan.doneCount}
+        minutes={plan.minutes}
+      />
+
       <MotivationOverview
         streak={streak}
         longest={longest}
@@ -64,7 +73,7 @@ export default async function DashboardPage() {
         week={week}
       />
 
-      <TodaysFocus revise={focus.revise} next={focus.next} />
+      <RevisionQueue due={reviews.due} upcoming={reviews.upcoming} />
 
       <section>
         <div className="mb-3 flex items-center justify-between">

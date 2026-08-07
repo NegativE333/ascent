@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { ClipboardList } from "lucide-react";
-import { useTransition } from "react";
+import { useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
 import {
   updateTopicConfidence,
   updateTopicPriority,
   updateTopicStatus,
 } from "@/lib/actions";
-import { needsRevision } from "@/lib/stats";
+import { hoursLabel, needsRevision, topicMinutes } from "@/lib/stats";
 import type { TopicPriority, TopicStatus, TopicWithSubject } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ConfidenceStars } from "@/components/syllabus/confidence-stars";
@@ -25,34 +25,42 @@ import {
 } from "@/components/ui/select";
 
 export function TopicRow({ topic }: { topic: TopicWithSubject }) {
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const revise = needsRevision(topic);
 
-  function setStatus(status: TopicStatus) {
+  // Optimistic values revert automatically if the action fails
+  const [status, showStatus] = useOptimistic(topic.status);
+  const [confidence, showConfidence] = useOptimistic(topic.confidence);
+  const [priority, showPriority] = useOptimistic(topic.priority);
+
+  function setStatus(next: TopicStatus) {
     startTransition(async () => {
+      showStatus(next);
       try {
-        await updateTopicStatus(topic.id, status);
-        if (status === "done") toast.success(`${topic.name} marked done`);
+        await updateTopicStatus(topic.id, next);
+        if (next === "done") toast.success(`${topic.name} marked done`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Update failed");
       }
     });
   }
 
-  function setConfidence(confidence: number) {
+  function setConfidence(next: number) {
     startTransition(async () => {
+      showConfidence(next);
       try {
-        await updateTopicConfidence(topic.id, confidence);
+        await updateTopicConfidence(topic.id, next);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Update failed");
       }
     });
   }
 
-  function setPriority(priority: TopicPriority) {
+  function setPriority(next: TopicPriority) {
     startTransition(async () => {
+      showPriority(next);
       try {
-        await updateTopicPriority(topic.id, priority);
+        await updateTopicPriority(topic.id, next);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Update failed");
       }
@@ -74,21 +82,22 @@ export function TopicRow({ topic }: { topic: TopicWithSubject }) {
               Revise
             </span>
           )}
-          {topic.priority === "high" && (
+          {priority === "high" && (
             <span className="rounded-[3px] bg-tag-high-bg px-1.5 py-0.5 text-[10px] font-medium text-tag-high-fg">
               High
             </span>
           )}
         </div>
         <p className="text-[11px] text-muted-foreground">
+          ~{hoursLabel(topicMinutes(topic))} ·{" "}
           {topic.last_practiced_at
-            ? `Practiced ${formatDistanceToNow(new Date(topic.last_practiced_at), { addSuffix: true })}`
-            : "Never practiced"}
+            ? `practiced ${formatDistanceToNow(new Date(topic.last_practiced_at), { addSuffix: true })}`
+            : "never practiced"}
         </p>
       </div>
 
       <Select
-        value={topic.priority}
+        value={priority}
         onValueChange={(v) => v && setPriority(v as TopicPriority)}
       >
         <SelectTrigger className="h-7 w-[88px] text-[11px] shadow-none">
@@ -102,14 +111,10 @@ export function TopicRow({ topic }: { topic: TopicWithSubject }) {
       </Select>
 
       <div className="opacity-100 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
-        <ConfidenceStars value={topic.confidence} onChange={setConfidence} />
+        <ConfidenceStars value={confidence} onChange={setConfidence} />
       </div>
 
-      <StatusControl
-        value={topic.status}
-        onChange={setStatus}
-        disabled={pending}
-      />
+      <StatusControl value={status} onChange={setStatus} />
 
       <div className="opacity-100 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
         <LogMcqDialog
