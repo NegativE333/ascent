@@ -31,9 +31,12 @@ import type { Subject } from "@/lib/types";
 function SidebarNav({
   subjects,
   onNavigate,
+  inSheet,
 }: {
   subjects: Subject[];
   onNavigate?: () => void;
+  /** Leaves room for the sheet's own close button in the top-right corner. */
+  inSheet?: boolean;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -56,7 +59,12 @@ function SidebarNav({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-1 px-3 py-3">
+      <div
+        className={cn(
+          "flex items-center justify-between gap-1 px-3 py-3",
+          inSheet && "pr-12"
+        )}
+      >
         <Link
           href="/"
           onClick={onNavigate}
@@ -212,6 +220,7 @@ export function Sidebar({ subjects }: { subjects: Subject[] }) {
             <SidebarNav
               subjects={subjects}
               onNavigate={() => setOpen(false)}
+              inSheet
             />
           </SheetContent>
         </Sheet>

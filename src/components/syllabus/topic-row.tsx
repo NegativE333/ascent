@@ -68,7 +68,7 @@ export function TopicRow({ topic }: { topic: TopicWithSubject }) {
   }
 
   return (
-    <div className="group grid grid-cols-1 items-center gap-2 border-b border-border px-3 py-2 row-hover last:border-b-0 sm:grid-cols-[minmax(0,1.3fr)_auto_auto_auto_auto] sm:gap-3">
+    <div className="group grid grid-cols-1 items-center gap-2 border-b border-border px-3 py-2.5 row-hover last:border-b-0 sm:grid-cols-[minmax(0,1.3fr)_auto_auto_auto_auto] sm:gap-3 sm:py-2">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <Link
@@ -96,37 +96,44 @@ export function TopicRow({ topic }: { topic: TopicWithSubject }) {
         </p>
       </div>
 
-      <Select
-        value={priority}
-        onValueChange={(v) => v && setPriority(v as TopicPriority)}
-      >
-        <SelectTrigger className="h-7 w-[88px] text-[11px] shadow-none">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="high">High</SelectItem>
-          <SelectItem value="medium">Medium</SelectItem>
-          <SelectItem value="low">Low</SelectItem>
-        </SelectContent>
-      </Select>
+      {/* One tidy control strip on phones, individual grid cells from sm up */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:contents">
+        <Select
+          value={priority}
+          onValueChange={(v) => v && setPriority(v as TopicPriority)}
+        >
+          <SelectTrigger className="h-7 w-[88px] text-[11px] shadow-none">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="high">High</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
+          </SelectContent>
+        </Select>
 
-      <div className="opacity-100 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
-        <ConfidenceStars value={confidence} onChange={setConfidence} />
-      </div>
+        <div className="opacity-100 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+          <ConfidenceStars value={confidence} onChange={setConfidence} />
+        </div>
 
-      <StatusControl value={status} onChange={setStatus} />
+        <StatusControl value={status} onChange={setStatus} />
 
-      <div className="opacity-100 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
-        <LogMcqDialog
-          topicId={topic.id}
-          topicName={topic.name}
-          trigger={
-            <Button size="xs" variant="ghost" className="gap-1 text-muted-foreground">
-              <ClipboardList className="size-3.5" />
-              Log
-            </Button>
-          }
-        />
+        <div className="ml-auto sm:ml-0 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+          <LogMcqDialog
+            topicId={topic.id}
+            topicName={topic.name}
+            trigger={
+              <Button
+                size="xs"
+                variant="ghost"
+                className="gap-1 text-muted-foreground"
+              >
+                <ClipboardList className="size-3.5" />
+                Log
+              </Button>
+            }
+          />
+        </div>
       </div>
     </div>
   );

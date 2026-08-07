@@ -136,14 +136,14 @@ export function SyllabusView({
             className="h-8 border-border bg-transparent pl-8 text-sm shadow-none"
           />
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           <Select
             value={specialFilter}
             onValueChange={(v) =>
               setSpecialFilter((v ?? "all") as "all" | "revision")
             }
           >
-            <SelectTrigger className="h-8 w-[130px] shadow-none">
+            <SelectTrigger className="h-8 w-full shadow-none sm:w-[130px]">
               <SelectValue placeholder="View" />
             </SelectTrigger>
             <SelectContent>
@@ -158,7 +158,7 @@ export function SyllabusView({
               setPriorityFilter((v ?? "all") as TopicPriority | "all")
             }
           >
-            <SelectTrigger className="h-8 w-[120px] shadow-none">
+            <SelectTrigger className="h-8 w-full shadow-none sm:w-[120px]">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
             <SelectContent>
@@ -175,7 +175,7 @@ export function SyllabusView({
               setStatusFilter((v ?? "all") as TopicStatus | "all")
             }
           >
-            <SelectTrigger className="h-8 w-[130px] shadow-none">
+            <SelectTrigger className="h-8 w-full shadow-none sm:w-[130px]">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -193,7 +193,7 @@ export function SyllabusView({
               else router.push(`/syllabus?subject=${v}`);
             }}
           >
-            <SelectTrigger className="h-8 w-[160px] shadow-none">
+            <SelectTrigger className="h-8 w-full shadow-none sm:w-[160px]">
               <SelectValue placeholder="Subject" />
             </SelectTrigger>
             <SelectContent>
@@ -210,7 +210,7 @@ export function SyllabusView({
             value={confidenceFilter}
             onValueChange={(v) => setConfidenceFilter(v ?? "all")}
           >
-            <SelectTrigger className="h-8 w-[130px] shadow-none">
+            <SelectTrigger className="h-8 w-full shadow-none sm:w-[130px]">
               <SelectValue placeholder="Confidence" />
             </SelectTrigger>
             <SelectContent>
