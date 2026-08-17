@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  Gamepad2,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -173,6 +174,15 @@ function SidebarNav({
         >
           <FileText className="size-4 shrink-0 opacity-70" />
           Formula sheet
+        </Link>
+
+        <Link
+          href="/games"
+          onClick={onNavigate}
+          className={itemClass(pathname.startsWith("/games"))}
+        >
+          <Gamepad2 className="size-4 shrink-0 opacity-70" />
+          Games
         </Link>
 
         <Link
