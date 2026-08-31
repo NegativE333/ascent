@@ -2,8 +2,10 @@ import { AccuracyTrendChart } from "@/components/analytics/accuracy-trend";
 import { MockTestsPanel } from "@/components/analytics/mock-tests-panel";
 import { ScoreProjectionPanel } from "@/components/analytics/score-projection";
 import { SectionalAnalysis } from "@/components/analytics/sectional-analysis";
+import { SectionalMockComparison } from "@/components/analytics/sectional-mock-comparison";
 import { StreakCounter } from "@/components/analytics/streak-counter";
 import { TimeBySubjectChart } from "@/components/analytics/time-by-subject";
+import { LogSectionalMockDialog } from "@/components/sectional-mock/log-sectional-mock-dialog";
 import { getDashboardData } from "@/lib/data";
 import {
   accuracyTrend,
@@ -16,8 +18,16 @@ import {
 } from "@/lib/stats";
 
 export default async function AnalyticsPage() {
-  const { subjects, topics, sessions, activityDates, mocks, settings, study } =
-    await getDashboardData();
+  const {
+    subjects,
+    topics,
+    sessions,
+    activityDates,
+    mocks,
+    settings,
+    study,
+    sectionalMocks,
+  } = await getDashboardData();
   const { current: streak, longest: best } = streakFromDays(activityDates);
   const totalDays = new Set(activityDates).size;
   const trend = accuracyTrend(sessions, subjects, topics);
@@ -136,9 +146,23 @@ export default async function AnalyticsPage() {
       </section>
 
       <section>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold">Sectional mocks</h2>
+            <p className="text-xs text-muted-foreground">
+              Subject-only tests — separate from full-length mocks below.
+            </p>
+          </div>
+          <LogSectionalMockDialog subjects={subjects} />
+        </div>
+        <SectionalMockComparison mocks={sectionalMocks} subjects={subjects} />
+      </section>
+
+      <section>
         <h2 className="mb-1 text-sm font-semibold">Sectional performance</h2>
         <p className="mb-3 text-xs text-muted-foreground">
-          Where your mock marks are won and lost.
+          From full-length mock breakdowns — where your mock marks are won and
+          lost.
         </p>
         <SectionalAnalysis stats={sectional} />
       </section>

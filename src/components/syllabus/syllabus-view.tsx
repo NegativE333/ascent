@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SectionalMockPanel } from "@/components/sectional-mock/sectional-mock-panel";
 import { TopicRow } from "@/components/syllabus/topic-row";
 import { GA_SECTION_ORDER } from "@/lib/syllabus-seed";
 import {
@@ -20,6 +21,7 @@ import {
   topicsProgress,
 } from "@/lib/stats";
 import type {
+  SectionalMock,
   Subject,
   TopicPriority,
   TopicStatus,
@@ -51,9 +53,11 @@ function sectionSortKey(section: string | null, subjectSlug: string) {
 export function SyllabusView({
   subjects,
   topics,
+  sectionalMocks = [],
 }: {
   subjects: Subject[];
   topics: TopicWithSubject[];
+  sectionalMocks?: SectionalMock[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -232,6 +236,14 @@ export function SyllabusView({
         </div>
       ) : (
         <div className="space-y-6">
+          {selectedSubject ? (
+            <SectionalMockPanel
+              subject={selectedSubject}
+              subjects={sortedSubjects}
+              mocks={sectionalMocks}
+            />
+          ) : null}
+
           {groups.map(({ subject, rows }) => {
             const hasSections = rows.some((t) => t.section);
             const sections = hasSections

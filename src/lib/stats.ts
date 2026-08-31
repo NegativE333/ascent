@@ -9,6 +9,7 @@ import {
 import type {
   McqSession,
   MockTest,
+  SectionalMock,
   StudySession,
   Subject,
   Topic,
@@ -227,6 +228,79 @@ export function netScore(
 ) {
   const wrong = session.total_questions - session.correct_answers;
   return Number((session.correct_answers - 0.5 * wrong).toFixed(1));
+}
+
+export function sectionalMockAccuracy(
+  mock: Pick<SectionalMock, "correct_answers" | "total_questions">
+) {
+  if (mock.total_questions === 0) return 0;
+  return Math.round((mock.correct_answers / mock.total_questions) * 100);
+}
+
+export function sectionalMockNetScore(
+  mock: Pick<SectionalMock, "correct_answers" | "wrong_answers">
+) {
+  return Number((mock.correct_answers - 0.5 * mock.wrong_answers).toFixed(1));
+}
+
+export type SectionalMockSubjectStat = {
+  slug: string;
+  label: string;
+  mocks: number;
+  avgNet: number;
+  accuracy: number;
+  trend: { date: string; net: number; name: string }[];
+};
+
+/** Cross-subject comparison from dedicated sectional mock logs. */
+export function sectionalMockBySubject(
+  mocks: SectionalMock[],
+  subjects: Subject[]
+): SectionalMockSubjectStat[] {
+  return subjects.map((subject) => {
+    const subjectMocks = mocks
+      .filter((m) => m.subject_id === subject.id)
+      .sort((a, b) => a.mock_date.localeCompare(b.mock_date));
+
+    let correct = 0;
+    let wrong = 0;
+    const trend = subjectMocks.map((m) => ({
+      date: m.mock_date,
+      name: m.mock_name ?? subject.name,
+      net: sectionalMockNetScore(m),
+    }));
+
+    for (const m of subjectMocks) {
+      correct += m.correct_answers;
+      wrong += m.wrong_answers;
+    }
+    const attempted = correct + wrong;
+    const totalNet = subjectMocks.reduce(
+      (sum, m) => sum + sectionalMockNetScore(m),
+      0
+    );
+
+    return {
+      slug: subject.slug,
+      label: subject.name,
+      mocks: subjectMocks.length,
+      avgNet:
+        subjectMocks.length === 0
+          ? 0
+          : Number((totalNet / subjectMocks.length).toFixed(1)),
+      accuracy:
+        attempted === 0 ? 0 : Math.round((correct / attempted) * 100),
+      trend,
+    };
+  });
+}
+
+export function weakestSectionalMockSubject(
+  stats: SectionalMockSubjectStat[]
+): SectionalMockSubjectStat | null {
+  const withData = stats.filter((s) => s.mocks > 0);
+  if (withData.length === 0) return null;
+  return withData.reduce((min, s) => (s.avgNet < min.avgNet ? s : min));
 }
 
 export type HeatmapCell = {

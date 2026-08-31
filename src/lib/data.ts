@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { ensureSyllabusSeeded } from "@/lib/actions";
 import {
   mapMockTest,
+  mapSectionalMock,
   mapSession,
   mapSettings,
   mapStudySession,
@@ -13,6 +14,7 @@ import {
 import type {
   McqSession,
   MockTest,
+  SectionalMock,
   StudySession,
   Subject,
   Topic,
@@ -115,7 +117,7 @@ export const getSettings = cache(async (): Promise<UserSettings> => {
 
 export const getActivityDates = cache(async (): Promise<string[]> => {
   const userId = await requireUserId();
-  const [days, sessions, study] = await Promise.all([
+  const [days, sessions, study, mocks, sectionalMocks] = await Promise.all([
     prisma.activityDay.findMany({
       where: { userId },
       orderBy: { date: "asc" },
@@ -129,11 +131,22 @@ export const getActivityDates = cache(async (): Promise<string[]> => {
       where: { userId },
       select: { sessionDate: true },
     }),
+    prisma.mockTest.findMany({
+      where: { userId },
+      select: { testDate: true },
+    }),
+    prisma.sectionalMock.findMany({
+      where: { userId },
+      select: { mockDate: true },
+    }),
   ]);
   const dates = new Set<string>();
   for (const d of days) dates.add(d.date.toISOString().slice(0, 10));
   for (const s of sessions) dates.add(s.sessionDate.toISOString().slice(0, 10));
   for (const s of study) dates.add(s.sessionDate.toISOString().slice(0, 10));
+  for (const m of mocks) dates.add(m.testDate.toISOString().slice(0, 10));
+  for (const m of sectionalMocks)
+    dates.add(m.mockDate.toISOString().slice(0, 10));
   return Array.from(dates);
 });
 
@@ -155,6 +168,16 @@ export const getMockTests = cache(async (): Promise<MockTest[]> => {
   return mocks.map(mapMockTest);
 });
 
+export const getSectionalMocks = cache(async (): Promise<SectionalMock[]> => {
+  const userId = await requireUserId();
+  const mocks = await prisma.sectionalMock.findMany({
+    where: { userId },
+    include: { subject: true },
+    orderBy: [{ mockDate: "desc" }, { createdAt: "desc" }],
+  });
+  return mocks.map(mapSectionalMock);
+});
+
 export const getNotesTopics = cache(async (): Promise<TopicWithSubject[]> => {
   const topics = await getTopics();
   return topics.filter((t) => t.notes && t.notes.trim().length > 0);
@@ -165,7 +188,7 @@ export const getDashboardData = cache(async () => {
   await requireUserId();
   await ensureSeeded();
 
-  const [subjects, topics, sessions, settings, activityDates, mocks, study] =
+  const [subjects, topics, sessions, settings, activityDates, mocks, study, sectionalMocks] =
     await Promise.all([
       getSubjects(),
       getTopics(),
@@ -174,6 +197,7 @@ export const getDashboardData = cache(async () => {
       getActivityDates(),
       getMockTests(),
       getStudySessions(),
+      getSectionalMocks(),
     ]);
 
   return {
@@ -184,6 +208,7 @@ export const getDashboardData = cache(async () => {
     activityDates,
     mocks,
     study,
+    sectionalMocks,
   };
 });
 
@@ -194,4 +219,5 @@ export type {
   StudySession,
   UserSettings,
   MockTest,
+  SectionalMock,
 };

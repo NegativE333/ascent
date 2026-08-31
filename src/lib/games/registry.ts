@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Mountain, Waves } from "lucide-react";
+import { Droplets, Mountain, Waves } from "lucide-react";
 
 export type GameMeta = {
   id: string;
@@ -26,5 +26,13 @@ export const GAMES: GameMeta[] = [
       "Explore the labeled atlas, then hunt ranges, peaks, and passes on the map.",
     route: "/games/himalayan-ranges",
     icon: Mountain,
+  },
+  {
+    id: "peninsular-rivers",
+    title: "Peninsular River Hunt",
+    description:
+      "Explore east- and west-flowing rivers, then hunt by clue — including coast panels.",
+    route: "/games/peninsular-rivers",
+    icon: Droplets,
   },
 ];

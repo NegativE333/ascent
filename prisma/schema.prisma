@@ -21,12 +21,13 @@ enum TopicPriority {
 }
 
 model Subject {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String          @id @default(uuid()) @db.Uuid
   name         String
-  slug         String   @unique
-  displayOrder Int      @default(0) @map("display_order")
-  createdAt    DateTime @default(now()) @map("created_at")
+  slug         String          @unique
+  displayOrder Int             @default(0) @map("display_order")
+  createdAt    DateTime        @default(now()) @map("created_at")
   topics       Topic[]
+  sectionalMocks SectionalMock[]
 
   @@map("subjects")
 }
@@ -144,6 +145,27 @@ model MockTest {
   @@index([userId])
   @@index([testDate])
   @@map("mock_tests")
+}
+
+/** Single-subject sectional mock — separate from full-length mock_tests. */
+model SectionalMock {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  subjectId        String   @map("subject_id") @db.Uuid
+  mockName         String?  @map("mock_name")
+  mockDate         DateTime @map("mock_date") @db.Date
+  totalQuestions   Int      @map("total_questions")
+  correctAnswers   Int      @map("correct_answers")
+  wrongAnswers     Int      @map("wrong_answers")
+  timeTakenMinutes Int?     @map("time_taken_minutes")
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  subject          Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([subjectId])
+  @@index([mockDate])
+  @@map("sectional_mocks")
 }
 
 model ActivityDay {

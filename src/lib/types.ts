@@ -109,6 +109,21 @@ export type MockTest = {
   created_at: string;
 };
 
+export type SectionalMock = {
+  id: string;
+  user_id: string;
+  subject_id: string;
+  mock_name: string | null;
+  mock_date: string;
+  total_questions: number;
+  correct_answers: number;
+  wrong_answers: number;
+  time_taken_minutes: number | null;
+  notes: string | null;
+  created_at: string;
+  subjects?: Subject;
+};
+
 /** SSC CGL Tier 1 sections, keyed by subject slug so colours stay consistent. */
 export const MOCK_SECTIONS = [
   { slug: "quantitative-aptitude", label: "Quant", questions: 25 },

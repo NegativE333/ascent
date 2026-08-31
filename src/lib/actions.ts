@@ -504,7 +504,7 @@ export async function createMockTest(input: {
   sectionalBreakdown?: Record<string, MockSectionScore> | null;
 }) {
   const user = await requireUser();
-  const testDate = input.testDate ? new Date(input.testDate) : new Date();
+  const testDate = input.testDate ? dateOnly(input.testDate) : dateOnly(new Date());
   const score =
     input.score ??
     Number((input.correct - 0.5 * input.wrong).toFixed(1));
@@ -529,6 +529,58 @@ export async function createMockTest(input: {
 
   revalidatePath("/analytics");
   revalidatePath("/");
+}
+
+export async function createSectionalMock(input: {
+  subjectId: string;
+  mockName?: string;
+  mockDate?: string;
+  totalQuestions: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  timeTakenMinutes?: number | null;
+  notes?: string;
+}) {
+  const user = await requireUser();
+
+  const subject = await prisma.subject.findUnique({
+    where: { id: input.subjectId },
+  });
+  if (!subject) throw new Error("Subject not found");
+
+  if (input.correctAnswers + input.wrongAnswers > input.totalQuestions) {
+    throw new Error("Correct + wrong cannot exceed total questions");
+  }
+
+  const mockDate = input.mockDate ? dateOnly(input.mockDate) : dateOnly(new Date());
+
+  await prisma.$transaction([
+    prisma.sectionalMock.create({
+      data: {
+        userId: user.id,
+        subjectId: input.subjectId,
+        mockName: input.mockName?.trim() || null,
+        mockDate,
+        totalQuestions: input.totalQuestions,
+        correctAnswers: input.correctAnswers,
+        wrongAnswers: input.wrongAnswers,
+        timeTakenMinutes: input.timeTakenMinutes ?? null,
+        notes: input.notes || null,
+      },
+    }),
+    activityUpsert(user.id, mockDate),
+  ]);
+
+  revalidatePath("/");
+  revalidatePath("/syllabus");
+  revalidatePath("/analytics");
+}
+
+export async function deleteSectionalMock(id: string) {
+  const user = await requireUser();
+  await prisma.sectionalMock.deleteMany({ where: { id, userId: user.id } });
+  revalidatePath("/syllabus");
+  revalidatePath("/analytics");
 }
 
 export async function deleteMockTest(id: string) {

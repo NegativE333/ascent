@@ -72,6 +72,7 @@ export default function LoginPage() {
               autoComplete="email"
               required
               autoFocus
+              suppressHydrationWarning
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"

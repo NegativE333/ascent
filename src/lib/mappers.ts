@@ -1,6 +1,7 @@
 import type {
   McqSession as PrismaMcqSession,
   MockTest as PrismaMockTest,
+  SectionalMock as PrismaSectionalMock,
   StudySession as PrismaStudySession,
   Subject as PrismaSubject,
   Topic as PrismaTopic,
@@ -10,6 +11,7 @@ import type {
   McqSession,
   MockSectionScore,
   MockTest,
+  SectionalMock,
   StudySession,
   Subject,
   Topic,
@@ -137,5 +139,24 @@ export function mapMockTest(m: PrismaMockTest): MockTest {
       (m.sectionalBreakdown as Record<string, MockSectionScore> | null) ?? null,
     notes: m.notes,
     created_at: m.createdAt.toISOString(),
+  };
+}
+
+export function mapSectionalMock(
+  m: PrismaSectionalMock & { subject?: PrismaSubject }
+): SectionalMock {
+  return {
+    id: m.id,
+    user_id: m.userId,
+    subject_id: m.subjectId,
+    mock_name: m.mockName,
+    mock_date: dateOnly(m.mockDate),
+    total_questions: m.totalQuestions,
+    correct_answers: m.correctAnswers,
+    wrong_answers: m.wrongAnswers,
+    time_taken_minutes: m.timeTakenMinutes,
+    notes: m.notes,
+    created_at: m.createdAt.toISOString(),
+    subjects: m.subject ? mapSubject(m.subject) : undefined,
   };
 }
