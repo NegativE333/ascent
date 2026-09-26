@@ -38,6 +38,7 @@ export default async function AnalyticsPage() {
     topics,
     sessions,
     mocks,
+    sectionalMocks,
     subjects,
     settings,
   });

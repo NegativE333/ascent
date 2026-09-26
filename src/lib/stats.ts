@@ -1337,6 +1337,37 @@ export type ScoreProjection = {
   confidence: "low" | "medium" | "high";
 };
 
+/** Full-mock sectional rows plus dedicated sectional mocks for one paper section. */
+function combinedSectionMockStats(
+  full: SectionalStat | undefined,
+  sectionalMocks: SectionalMock[]
+): {
+  mocks: number;
+  correct: number;
+  wrong: number;
+  avgAttempted: number;
+} | null {
+  const fullCount = full?.mocks ?? 0;
+  const sectionalCount = sectionalMocks.length;
+  if (fullCount === 0 && sectionalCount === 0) return null;
+
+  let correct = full?.correct ?? 0;
+  let wrong = full?.wrong ?? 0;
+  for (const m of sectionalMocks) {
+    correct += m.correct_answers;
+    wrong += m.wrong_answers;
+  }
+  const totalMocks = fullCount + sectionalCount;
+  const attempted = correct + wrong;
+
+  return {
+    mocks: totalMocks,
+    correct,
+    wrong,
+    avgAttempted: totalMocks === 0 ? 0 : attempted / totalMocks,
+  };
+}
+
 /**
  * Turns mock and practice data into an expected Tier 1 score. Mocks are used
  * where available since they reflect exam conditions; otherwise practice
@@ -1347,13 +1378,21 @@ export function projectedScore(input: {
   topics: Topic[];
   sessions: McqSession[];
   mocks: MockTest[];
+  sectionalMocks?: SectionalMock[];
   subjects: Subject[];
   settings: UserSettings | null;
 }): ScoreProjection {
   const { topics, sessions, mocks, subjects, settings } = input;
+  const sectionalMocks = input.sectionalMocks ?? [];
   const sectional = sectionalPerformance(mocks);
   const subjectBySlug = new Map(subjects.map((s) => [s.slug, s]));
   const topicSubject = new Map(topics.map((t) => [t.id, t.subject_id]));
+  const sectionalMocksBySubject = new Map<string, SectionalMock[]>();
+  for (const m of sectionalMocks) {
+    const list = sectionalMocksBySubject.get(m.subject_id) ?? [];
+    list.push(m);
+    sectionalMocksBySubject.set(m.subject_id, list);
+  }
 
   const sections: ScoreSection[] = MOCK_SECTIONS.map((meta) => {
     const subject = subjectBySlug.get(meta.slug);
@@ -1372,14 +1411,19 @@ export function projectedScore(input: {
       progress.totalMinutes === 0 ? 0 : coveredMinutes / progress.totalMinutes;
 
     const fromMocks = sectional.find((s) => s.slug === meta.slug);
+    const subjectSectionalMocks = subject
+      ? (sectionalMocksBySubject.get(subject.id) ?? [])
+      : [];
+    const mockStats = combinedSectionMockStats(fromMocks, subjectSectionalMocks);
 
     let accuracy = 0;
     let attemptRate = 0;
     let basis: ScoreSection["basis"] = "none";
 
-    if (fromMocks && fromMocks.mocks > 0) {
-      accuracy = fromMocks.accuracy / 100;
-      attemptRate = Math.min(1, fromMocks.avgAttempted / meta.questions);
+    if (mockStats) {
+      const attempted = mockStats.correct + mockStats.wrong;
+      accuracy = attempted === 0 ? 0 : mockStats.correct / attempted;
+      attemptRate = Math.min(1, mockStats.avgAttempted / meta.questions);
       basis = "mocks";
     } else if (subject) {
       const practice = sessions.filter(
@@ -1449,11 +1493,11 @@ export function projectedScore(input: {
     (n, s) => n + s.total_questions,
     0
   );
-  const mocksWithSections = sectional.filter((s) => s.mocks > 0).length;
+  const sectionsWithMocks = sections.filter((s) => s.basis === "mocks").length;
   const confidence =
-    mocksWithSections >= 3
+    sectionsWithMocks >= 3
       ? "high"
-      : mocksWithSections >= 1 || questionsAnswered >= 300
+      : sectionsWithMocks >= 1 || questionsAnswered >= 300
         ? "medium"
         : "low";
 

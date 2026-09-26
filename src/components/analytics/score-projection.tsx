@@ -12,9 +12,10 @@ import {
 import { cn } from "@/lib/utils";
 
 const CONFIDENCE_NOTE: Record<ScoreProjection["confidence"], string> = {
-  low: "Rough guess — log a mock with sectional marks to sharpen it.",
-  medium: "Reasonable estimate. Three mocks with sectional marks makes it solid.",
-  high: "Based on your recent mocks.",
+  low: "Rough guess — log a sectional or full mock to sharpen it.",
+  medium:
+    "Reasonable estimate. Mock data in three sections makes it solid.",
+  high: "Based on your recent mock and sectional mock scores.",
 };
 
 const BASIS_LABEL: Record<string, string> = {
