@@ -245,3 +245,16 @@
     transform: translateX(100%);
   }
 }
+
+@keyframes navigation-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.navigation-progress-indeterminate {
+  animation: navigation-progress-slide 0.9s ease-in-out infinite;
+}

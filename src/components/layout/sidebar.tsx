@@ -29,6 +29,12 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { signOut } from "@/lib/actions";
 import type { Subject } from "@/lib/types";
 
+/** Full prefetch in prod — dynamic routes default to partial prefetch only. */
+const navLinkPrefetch = {
+  prefetch: true as const,
+  unstable_dynamicOnHover: true,
+};
+
 function SidebarNav({
   subjects,
   onNavigate,
@@ -68,6 +74,7 @@ function SidebarNav({
       >
         <Link
           href="/"
+          {...navLinkPrefetch}
           onClick={onNavigate}
           className="flex min-w-0 items-center gap-2 rounded-[4px] px-2 py-1.5 text-sm font-semibold text-foreground"
         >
@@ -82,6 +89,7 @@ function SidebarNav({
       <nav className="flex-1 space-y-0.5 px-2">
         <Link
           href="/"
+          {...navLinkPrefetch}
           onClick={onNavigate}
           className={itemClass(pathname === "/")}
         >
@@ -97,6 +105,7 @@ function SidebarNav({
           >
             <Link
               href="/syllabus"
+              {...navLinkPrefetch}
               onClick={onNavigate}
               className="flex min-w-0 flex-1 items-center gap-2"
             >
@@ -132,6 +141,7 @@ function SidebarNav({
                     <Link
                       key={subject.id}
                       href={`/syllabus?subject=${subject.slug}`}
+                      {...navLinkPrefetch}
                       onClick={onNavigate}
                     className={cn(
                       "block truncate rounded-[4px] py-1.5 pr-2 text-[13px] transition-colors duration-150",
@@ -151,6 +161,7 @@ function SidebarNav({
 
         <Link
           href="/analytics"
+          {...navLinkPrefetch}
           onClick={onNavigate}
           className={itemClass(pathname.startsWith("/analytics"))}
         >
@@ -160,6 +171,7 @@ function SidebarNav({
 
         <Link
           href="/review"
+          {...navLinkPrefetch}
           onClick={onNavigate}
           className={itemClass(pathname.startsWith("/review"))}
         >
@@ -169,6 +181,7 @@ function SidebarNav({
 
         <Link
           href="/notes"
+          {...navLinkPrefetch}
           onClick={onNavigate}
           className={itemClass(pathname.startsWith("/notes"))}
         >
@@ -178,6 +191,7 @@ function SidebarNav({
 
         <Link
           href="/games"
+          {...navLinkPrefetch}
           onClick={onNavigate}
           className={itemClass(pathname.startsWith("/games"))}
         >
@@ -187,6 +201,7 @@ function SidebarNav({
 
         <Link
           href="/settings"
+          {...navLinkPrefetch}
           onClick={onNavigate}
           className={itemClass(pathname.startsWith("/settings"))}
         >
