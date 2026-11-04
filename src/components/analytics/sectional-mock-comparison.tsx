@@ -32,14 +32,37 @@ export function SectionalMockComparison({
   const withData = stats.filter((s) => s.mocks > 0);
   const weakest = weakestSectionalMockSubject(stats);
 
+  const counts = (
+    <div className="flex flex-wrap items-stretch gap-0 border-y border-border">
+      {stats.map((section, i) => (
+        <div
+          key={section.slug}
+          className={`flex min-w-[110px] flex-1 flex-col justify-center px-4 py-3 ${
+            i > 0 ? "border-l border-border" : ""
+          }`}
+        >
+          <span className="stat-number text-xl font-semibold">
+            {section.mocks}
+          </span>
+          <span className="mt-0.5 text-xs text-muted-foreground">
+            {shortLabel(section.label)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+
   if (withData.length === 0) {
     return (
-      <div className="panel px-4 py-8 text-center">
-        <p className="text-sm font-medium">No sectional mocks logged yet</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-          Log subject-only mocks from the syllabus (pick a subject) or use the
-          button above. Compare performance here once you have a few entries.
-        </p>
+      <div className="space-y-4">
+        {counts}
+        <div className="panel px-4 py-8 text-center">
+          <p className="text-sm font-medium">No sectional mocks logged yet</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+            Log subject-only mocks from the syllabus (pick a subject) or use the
+            button above. Compare performance here once you have a few entries.
+          </p>
+        </div>
       </div>
     );
   }
@@ -67,6 +90,7 @@ export function SectionalMockComparison({
 
   return (
     <div className="space-y-4">
+      {counts}
       {weakest && (
         <p className="text-sm text-muted-foreground">
           Weakest subject at sectional level is{" "}

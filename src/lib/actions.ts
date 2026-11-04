@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { examMarks } from "@/lib/stats";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -505,9 +506,7 @@ export async function createMockTest(input: {
 }) {
   const user = await requireUser();
   const testDate = input.testDate ? dateOnly(input.testDate) : dateOnly(new Date());
-  const score =
-    input.score ??
-    Number((input.correct - 0.5 * input.wrong).toFixed(1));
+  const score = input.score ?? examMarks(input.correct, input.wrong);
 
   await prisma.$transaction([
     prisma.mockTest.create({

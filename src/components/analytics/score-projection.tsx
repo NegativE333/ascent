@@ -155,11 +155,12 @@ export function ScoreProjectionPanel({
       )}
 
       <div className="panel overflow-hidden">
-        <div className="table-head hidden border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.2fr)_repeat(4,auto)] sm:gap-3">
+        <div className="table-head hidden border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.2fr)_repeat(5,auto)] sm:gap-3">
           <span>Section</span>
           <span className="text-right">Expected</span>
           <span className="text-right">Accuracy</span>
           <span className="text-right">Attempt</span>
+          <span className="text-right">Sectionals</span>
           <span className="text-right">Marks/hour</span>
         </div>
         {sections.map((section) => {
@@ -167,7 +168,7 @@ export function ScoreProjectionPanel({
           return (
             <div
               key={section.slug}
-              className="grid grid-cols-2 gap-2 border-b border-border px-3 py-2.5 last:border-0 row-hover sm:grid-cols-[minmax(0,1.2fr)_repeat(4,auto)] sm:gap-3"
+              className="grid grid-cols-2 gap-2 border-b border-border px-3 py-2.5 last:border-0 row-hover sm:grid-cols-[minmax(0,1.2fr)_repeat(5,auto)] sm:gap-3"
             >
               <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
                 <span
@@ -189,6 +190,9 @@ export function ScoreProjectionPanel({
               </span>
               <span className="stat-number text-sm text-muted-foreground sm:text-right">
                 {section.attemptRate}%
+              </span>
+              <span className="stat-number text-sm text-muted-foreground sm:text-right">
+                {section.sectionalMocks}
               </span>
               <span className="stat-number text-sm text-muted-foreground sm:text-right">
                 {section.marksPerHour ?? "—"}

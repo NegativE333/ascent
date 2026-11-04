@@ -14,7 +14,7 @@ import {
 import { toast } from "sonner";
 import { createMockTest, deleteMockTest } from "@/lib/actions";
 import { useChartTheme } from "@/hooks/use-chart-theme";
-import { mockScoreTrend } from "@/lib/stats";
+import { examMarks, mockScoreTrend } from "@/lib/stats";
 import { MOCK_SECTIONS, type MockTest } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,7 +169,7 @@ export function MockTestsPanel({ mocks }: { mocks: MockTest[] }) {
                   </td>
                   <td className="px-3 py-2">{m.name}</td>
                   <td className="stat-number px-3 py-2">
-                    {m.score ?? m.correct - 0.5 * m.wrong}
+                    {examMarks(m.correct, m.wrong)}
                   </td>
                   <td className="stat-number px-3 py-2 text-muted-foreground">
                     {m.percentile ?? "—"}

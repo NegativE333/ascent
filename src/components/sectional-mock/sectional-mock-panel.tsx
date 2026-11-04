@@ -66,7 +66,7 @@ export function SectionalMockPanel({
           {chartData.length > 0 && (
             <div className="panel p-4">
               <p className="mb-3 text-xs font-medium text-muted-foreground">
-                Net score trend (−0.5 marking)
+                Net score trend (+2 / −0.5)
               </p>
               <div className="h-48 w-full">
                 <ResponsiveContainer width="100%" height="100%">

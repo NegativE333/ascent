@@ -222,7 +222,23 @@ export function accuracy(
   return Math.round((session.correct_answers / session.total_questions) * 100);
 }
 
-/** SSC CGL net score: +1 correct, −0.5 wrong */
+/** SSC CGL Tier 1: 25 questions per section, +2 correct, −0.5 wrong. */
+export const TIER1_MARKS_PER_CORRECT = 2;
+export const TIER1_NEGATIVE_PER_WRONG = 0.5;
+export const TIER1_SECTION_MARKS = 50;
+export const TIER1_TOTAL_MARKS = 200;
+
+/** Exam marks: +2 correct, −0.5 wrong. */
+export function examMarks(correct: number, wrong: number) {
+  return Number(
+    (
+      correct * TIER1_MARKS_PER_CORRECT -
+      wrong * TIER1_NEGATIVE_PER_WRONG
+    ).toFixed(1)
+  );
+}
+
+/** Topic-practice net: +1 correct, −0.5 wrong (not exam marks). */
 export function netScore(
   session: Pick<McqSession, "correct_answers" | "total_questions">
 ) {
@@ -240,7 +256,7 @@ export function sectionalMockAccuracy(
 export function sectionalMockNetScore(
   mock: Pick<SectionalMock, "correct_answers" | "wrong_answers">
 ) {
-  return Number((mock.correct_answers - 0.5 * mock.wrong_answers).toFixed(1));
+  return examMarks(mock.correct_answers, mock.wrong_answers);
 }
 
 export type SectionalMockSubjectStat = {
@@ -1221,9 +1237,7 @@ export function mockScoreTrend(
     .sort((a, b) => a.test_date.localeCompare(b.test_date))
     .map((m) => ({
       date: m.test_date,
-      score:
-        m.score ??
-        Number((m.correct - 0.5 * m.wrong).toFixed(1)),
+      score: examMarks(m.correct, m.wrong),
       name: m.name,
     }));
 }
@@ -1238,7 +1252,7 @@ export type SectionalStat = {
   attempted: number;
   /** Correct out of attempted. */
   accuracy: number;
-  /** Average net marks per mock (+1 correct, −0.5 wrong). */
+  /** Average net marks per mock (+2 correct, −0.5 wrong). */
   avgNet: number;
   avgAttempted: number;
   /** Share of the section left unattempted, averaged across mocks. */
@@ -1270,14 +1284,14 @@ export function sectionalPerformance(mocks: MockTest[]): SectionalStat[] {
       trend.push({
         date: mock.test_date,
         name: mock.name,
-        net: Number((row.correct - 0.5 * row.wrong).toFixed(1)),
+        net: examMarks(row.correct, row.wrong),
         accuracy:
           attempted === 0 ? 0 : Math.round((row.correct / attempted) * 100),
       });
     }
 
     const attempted = correct + wrong;
-    const net = correct - 0.5 * wrong;
+    const net = examMarks(correct, wrong);
 
     return {
       slug: section.slug,
@@ -1303,12 +1317,6 @@ export function sectionalPerformance(mocks: MockTest[]): SectionalStat[] {
   });
 }
 
-/** SSC CGL Tier 1: 25 questions per section, +2 correct, −0.5 wrong. */
-const TIER1_MARKS_PER_CORRECT = 2;
-const TIER1_NEGATIVE_PER_WRONG = 0.5;
-export const TIER1_SECTION_MARKS = 50;
-export const TIER1_TOTAL_MARKS = 200;
-
 export type ScoreSection = {
   slug: string;
   label: string;
@@ -1323,6 +1331,8 @@ export type ScoreSection = {
   remainingHours: number;
   /** Marks you'd gain per remaining study hour, where accuracy is known. */
   marksPerHour: number | null;
+  /** Dedicated sectional mocks logged for this subject (not full-length). */
+  sectionalMocks: number;
   basis: "mocks" | "practice" | "none";
 };
 
@@ -1467,6 +1477,7 @@ export function projectedScore(input: {
         basis !== "none" && remainingHours > 0
           ? Number((gain / remainingHours).toFixed(2))
           : null,
+      sectionalMocks: subjectSectionalMocks.length,
       basis,
     };
   });
